@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import Kiosk from "./Pages/Kiosk";
-import Admin from "./Pages/Admin";
-import Login from "./Pages/Login";
+import Kiosk from './Pages/Kiosk'
+import Admin from './Pages/Admin'
+import Login from './Pages/Login'
 
 function App() {
   return (
