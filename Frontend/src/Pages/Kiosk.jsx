@@ -14,6 +14,22 @@ function Kiosk() {
 
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (paymentState !== "idle") return;
+      try {
+        const res = await api.get("/products/latest-scan");
+        if (res.data && res.data.barcode) {
+          addToCart(res.data);
+        }
+      } catch (err) {
+        // No new scan yet — that is fine
+      }
+    }, 1500);
+
+    return () => clearInterval(interval);
+  }, [paymentState]);
+
   const addToCart = (product) => {
     setCart((prev) => {
       const existing = prev.find((i) => i.barcode === product.barcode);

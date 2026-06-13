@@ -74,13 +74,13 @@ function Admin() {
   };
 
   const handleDeleteProduct = async (id) => {
-    try {
-      await api.delete(`/products/${id}`);
-      fetchAll();
-    } catch (err) {
-      console.error("Delete error:", err);
-    }
-  };
+  try {
+    await api.delete(`/products/${id}`)
+    setProducts(prev => prev.filter(p => p.id !== id))
+  } catch (err) {
+    console.error('Delete error:', err)
+  }
+}
 
   const handleRegisterCard = async () => {
     if (!cardForm.uid || !cardForm.owner_name) {

@@ -38,4 +38,33 @@ router.post("/", (req, res) => {
   }
 });
 
+// POST /api/scanner/item — phone scanner sends barcode here
+router.post('/scanner/item', (req, res) => {
+  const { barcode } = req.body
+  if (!barcode) return res.status(400).json({ error: 'Barcode required' })
+  
+  const product = db.prepare('SELECT * FROM products WHERE barcode = ?').get(barcode)
+  if (!product) return res.status(404).json({ error: 'Product not found' })
+
+  res.json({ 
+    success: true,
+    product 
+  })
+})
+
+// GET product by barcode
+router.get('/:barcode', (req, res) => {
+  const product = db.prepare('SELECT * FROM products WHERE barcode = ?').get(req.params.barcode)
+  if (!product) return res.status(404).json({ error: 'Product not found' })
+  res.json(product)
+})
+
+// DELETE product by id
+router.delete('/:id', (req, res) => {
+  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id)
+  if (!product) return res.status(404).json({ error: 'Product not found' })
+  db.prepare('DELETE FROM products WHERE id = ?').run(req.params.id)
+  res.json({ message: 'Product deleted successfully' })
+})
+
 module.exports = router;
