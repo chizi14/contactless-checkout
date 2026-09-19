@@ -1,2 +1,2 @@
-Backend/node_modules/
-Backend/checkout.db
+.env
+Backend/.env

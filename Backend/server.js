@@ -1,10 +1,7 @@
 const express = require('express')
 const cors = require('cors')
-const https = require('https')
-const fs = require('fs')
-const path = require('path')
+const http = require('http')
 const app = express()
-const PORT = 3000
 
 app.use(cors())
 app.use(express.json())
@@ -22,6 +19,6 @@ app.get('/', (req, res) => {
   res.json({ message: 'Checkout API is running' })
 })
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on http://localhost:${PORT}`)
+http.createServer(app).listen(3000, '0.0.0.0', () => {
+  console.log('Server running on port 3000')
 })

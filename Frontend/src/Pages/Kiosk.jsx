@@ -30,6 +30,23 @@ function Kiosk() {
     return () => clearInterval(interval);
   }, [paymentState]);
 
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (paymentState !== "idle") return;
+      if (cart.length === 0) return;
+      try {
+        const res = await api.get("/cards/latest-tap");
+        if (res.data && res.data.timestamp) {
+          handlePayment(res.data);
+        }
+      } catch (err) {
+        // No tap yet — fine
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [paymentState, cart]);
+
   const addToCart = (product) => {
     setCart((prev) => {
       const existing = prev.find((i) => i.barcode === product.barcode);
@@ -56,7 +73,7 @@ function Kiosk() {
     setError("");
   };
 
-  const handlePayment = async (uid) => {
+  const handlePayment = async (cardData) => {
     if (cart.length === 0) {
       setError("Cart is empty");
       return;
@@ -65,9 +82,7 @@ function Kiosk() {
     setPaymentState("processing");
 
     try {
-      const verifyRes = await api.post("/cards/verify", { uid });
-
-      if (!verifyRes.data.verified) {
+      if (!cardData.verified) {
         setPaymentState("denied");
         return;
       }
@@ -79,13 +94,13 @@ function Kiosk() {
       }));
 
       const transactionRes = await api.post("/transactions", {
-        card_id: verifyRes.data.card_id,
+        card_id: cardData.card_id,
         items,
         total_amount: total,
       });
 
       setTransactionData({
-        owner: verifyRes.data.owner,
+        owner: cardData.owner,
         ...transactionRes.data,
       });
       setPaymentState("approved");
@@ -95,8 +110,13 @@ function Kiosk() {
   };
 
   // Simulate card tap for testing (remove when ESP32 is connected)
-  const simulateCardTap = () => {
-    handlePayment("A3F211CC");
+  const simulateCardTap = async () => {
+    try {
+      const res = await api.post("/cards/verify", { uid: "A3F211CC" });
+      handlePayment(res.data);
+    } catch (err) {
+      handlePayment({ verified: false });
+    }
   };
 
   return (

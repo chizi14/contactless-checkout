@@ -1,70 +1,88 @@
-const express = require("express");
-const router = express.Router();
-const db = require("../Database");
+const express = require('express')
+const router = express.Router()
+const db = require('../Database')
 
-router.get("/", (req, res) => {
-  const products = db
-    .prepare("SELECT id, barcode, name, price FROM products ORDER BY id DESC")
-    .all();
-  res.json(products);
-});
+let lastScannedProduct = null
 
-router.post("/", (req, res) => {
-  const { barcode, name, price } = req.body;
+router.get('/', async (req, res) => {
+  const result = await db.query('SELECT * FROM products ORDER BY id DESC')
+  res.json(result.rows)
+})
 
-  if (!barcode || !name || price === undefined || price === null) {
-    return res
-      .status(400)
-      .json({ error: "barcode, name and price are required" });
+router.get('/latest-scan', (req, res) => {
+  if (!lastScannedProduct) {
+    return res.status(404).json({ error: 'No scan yet' })
+  }
+  const scan = lastScannedProduct
+  lastScannedProduct = null
+  res.json(scan)
+})
+
+router.get('/:barcode', async (req, res) => {
+  const result = await db.query(
+    'SELECT * FROM products WHERE barcode = $1',
+    [req.params.barcode]
+  )
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: 'Product not found' })
+  }
+  res.json(result.rows[0])
+})
+
+router.post('/', async (req, res) => {
+  const { barcode, name, price } = req.body
+
+  if (!barcode || !name || !price) {
+    return res.status(400).json({ error: 'Barcode, name and price are required' })
+  }
+
+  if (isNaN(price) || price <= 0) {
+    return res.status(400).json({ error: 'Price must be a positive number' })
   }
 
   try {
-    const stmt = db.prepare(
-      "INSERT INTO products (barcode, name, price) VALUES (?, ?, ?)",
-    );
-    const result = stmt.run(barcode, name, Number(price));
-
+    const result = await db.query(
+      'INSERT INTO products (barcode, name, price) VALUES ($1, $2, $3) RETURNING *',
+      [barcode, name, parseFloat(price)]
+    )
     res.status(201).json({
-      message: "Product created successfully",
-      product_id: result.lastInsertRowid,
-      barcode,
+      message: 'Product added successfully',
+      product_id: result.rows[0].id,
       name,
-      price: Number(price),
-    });
+      barcode,
+      price: parseFloat(price)
+    })
   } catch (error) {
-    res
-      .status(409)
-      .json({ error: "Product already exists or could not be created" });
+    res.status(409).json({ error: 'Product with this barcode already exists' })
   }
-});
+})
 
-// POST /api/scanner/item — phone scanner sends barcode here
-router.post('/scanner/item', (req, res) => {
+router.post('/scanner/item', async (req, res) => {
   const { barcode } = req.body
   if (!barcode) return res.status(400).json({ error: 'Barcode required' })
-  
-  const product = db.prepare('SELECT * FROM products WHERE barcode = ?').get(barcode)
-  if (!product) return res.status(404).json({ error: 'Product not found' })
 
-  res.json({ 
-    success: true,
-    product 
-  })
+  const result = await db.query(
+    'SELECT * FROM products WHERE barcode = $1',
+    [barcode]
+  )
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: 'Product not found' })
+  }
+
+  lastScannedProduct = { ...result.rows[0], timestamp: Date.now() }
+  res.json({ success: true, product: result.rows[0] })
 })
 
-// GET product by barcode
-router.get('/:barcode', (req, res) => {
-  const product = db.prepare('SELECT * FROM products WHERE barcode = ?').get(req.params.barcode)
-  if (!product) return res.status(404).json({ error: 'Product not found' })
-  res.json(product)
-})
-
-// DELETE product by id
-router.delete('/:id', (req, res) => {
-  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id)
-  if (!product) return res.status(404).json({ error: 'Product not found' })
-  db.prepare('DELETE FROM products WHERE id = ?').run(req.params.id)
+router.delete('/:id', async (req, res) => {
+  const result = await db.query(
+    'SELECT * FROM products WHERE id = $1',
+    [req.params.id]
+  )
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: 'Product not found' })
+  }
+  await db.query('DELETE FROM products WHERE id = $1', [req.params.id])
   res.json({ message: 'Product deleted successfully' })
 })
 
-module.exports = router;
+module.exports = router
