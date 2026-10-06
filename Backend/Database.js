@@ -31,9 +31,12 @@ const createTables = async () => {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `)
-    await pool.query(`
+
+  await pool.query(`
     ALTER TABLE cards ADD COLUMN IF NOT EXISTS balance NUMERIC(12,2) NOT NULL DEFAULT 0;
+    ALTER TABLE cards ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
   `)
+
   console.log('Database tables ready')
 }
 

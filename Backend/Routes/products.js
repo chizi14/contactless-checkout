@@ -4,6 +4,7 @@ const db = require('../Database')
 
 let lastScannedProduct = null
 
+// READ all products
 router.get('/', async (req, res) => {
   const result = await db.query('SELECT * FROM products ORDER BY id DESC')
   res.json(result.rows)
@@ -18,6 +19,7 @@ router.get('/latest-scan', (req, res) => {
   res.json(scan)
 })
 
+// READ one product by barcode
 router.get('/:barcode', async (req, res) => {
   const result = await db.query(
     'SELECT * FROM products WHERE barcode = $1',
@@ -29,6 +31,7 @@ router.get('/:barcode', async (req, res) => {
   res.json(result.rows[0])
 })
 
+// CREATE a product
 router.post('/', async (req, res) => {
   const { barcode, name, price } = req.body
 
@@ -73,15 +76,39 @@ router.post('/scanner/item', async (req, res) => {
   res.json({ success: true, product: result.rows[0] })
 })
 
+// UPDATE a product (name and price; the barcode stays fixed)
+router.put('/:id', async (req, res) => {
+  const { name, price } = req.body
+
+  if (!name || !price) {
+    return res.status(400).json({ error: 'Name and price are required' })
+  }
+
+  if (isNaN(price) || price <= 0) {
+    return res.status(400).json({ error: 'Price must be a positive number' })
+  }
+
+  const result = await db.query(
+    'UPDATE products SET name = $1, price = $2 WHERE id = $3 RETURNING *',
+    [name, parseFloat(price), req.params.id]
+  )
+
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: 'Product not found' })
+  }
+
+  res.json({ message: 'Product updated successfully', product: result.rows[0] })
+})
+
+// DELETE a product
 router.delete('/:id', async (req, res) => {
   const result = await db.query(
-    'SELECT * FROM products WHERE id = $1',
+    'DELETE FROM products WHERE id = $1 RETURNING id',
     [req.params.id]
   )
   if (result.rows.length === 0) {
     return res.status(404).json({ error: 'Product not found' })
   }
-  await db.query('DELETE FROM products WHERE id = $1', [req.params.id])
   res.json({ message: 'Product deleted successfully' })
 })
 

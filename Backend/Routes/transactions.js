@@ -2,88 +2,114 @@ const express = require('express')
 const router = express.Router()
 const db = require('../Database')
 
-router.post('/', async (req, res) => {
-  const { card_id, items, total_amount } = req.body
+let lastScannedProduct = null
 
-  if (!card_id || !items || !total_amount) {
-    return res.status(400).json({ error: 'card_id, items and total_amount are required' })
+// READ all products
+router.get('/', async (req, res) => {
+  const result = await db.query('SELECT * FROM products ORDER BY id DESC')
+  res.json(result.rows)
+})
+
+router.get('/latest-scan', (req, res) => {
+  if (!lastScannedProduct) {
+    return res.status(404).json({ error: 'No scan yet' })
   }
+  const scan = lastScannedProduct
+  lastScannedProduct = null
+  res.json(scan)
+})
 
-  if (!Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ error: 'Items must be a non-empty array' })
-  }
-
-  const cardResult = await db.query(
-    'SELECT * FROM cards WHERE id = $1',
-    [card_id]
+// READ one product by barcode
+router.get('/:barcode', async (req, res) => {
+  const result = await db.query(
+    'SELECT * FROM products WHERE barcode = $1',
+    [req.params.barcode]
   )
-  if (cardResult.rows.length === 0) {
-    return res.status(404).json({ error: 'Card not found' })
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: 'Product not found' })
+  }
+  res.json(result.rows[0])
+})
+
+// CREATE a product
+router.post('/', async (req, res) => {
+  const { barcode, name, price } = req.body
+
+  if (!barcode || !name || !price) {
+    return res.status(400).json({ error: 'Barcode, name and price are required' })
   }
 
-  const items_json = JSON.stringify(items)
+  if (isNaN(price) || price <= 0) {
+    return res.status(400).json({ error: 'Price must be a positive number' })
+  }
+
+  try {
+    const result = await db.query(
+      'INSERT INTO products (barcode, name, price) VALUES ($1, $2, $3) RETURNING *',
+      [barcode, name, parseFloat(price)]
+    )
+    res.status(201).json({
+      message: 'Product added successfully',
+      product_id: result.rows[0].id,
+      name,
+      barcode,
+      price: parseFloat(price)
+    })
+  } catch (error) {
+    res.status(409).json({ error: 'Product with this barcode already exists' })
+  }
+})
+
+router.post('/scanner/item', async (req, res) => {
+  const { barcode } = req.body
+  if (!barcode) return res.status(400).json({ error: 'Barcode required' })
 
   const result = await db.query(
-    `INSERT INTO transactions (card_id, total_amount, items_json, status)
-     VALUES ($1, $2, $3, 'approved') RETURNING *`,
-    [card_id, parseFloat(total_amount), items_json]
+    'SELECT * FROM products WHERE barcode = $1',
+    [barcode]
   )
-
-  res.status(201).json({
-    message: 'Transaction approved',
-    transaction_id: result.rows[0].id,
-    owner: cardResult.rows[0].owner_name,
-    total_amount: parseFloat(total_amount),
-    items: items,
-    created_at: result.rows[0].created_at,
-    status: 'approved'
-  })
-})
-
-router.get('/', async (req, res) => {
-  const result = await db.query(`
-    SELECT 
-      transactions.id,
-      transactions.total_amount,
-      transactions.items_json,
-      transactions.status,
-      transactions.created_at,
-      cards.owner_name
-    FROM transactions
-    JOIN cards ON transactions.card_id = cards.id
-    ORDER BY transactions.created_at DESC
-  `)
-
-  const parsed = result.rows.map(t => ({
-    ...t,
-    items: JSON.parse(t.items_json)
-  }))
-
-  res.json(parsed)
-})
-
-router.get('/:id', async (req, res) => {
-  const result = await db.query(`
-    SELECT 
-      transactions.id,
-      transactions.total_amount,
-      transactions.items_json,
-      transactions.status,
-      transactions.created_at,
-      cards.owner_name
-    FROM transactions
-    JOIN cards ON transactions.card_id = cards.id
-    WHERE transactions.id = $1
-  `, [req.params.id])
-
   if (result.rows.length === 0) {
-    return res.status(404).json({ error: 'Transaction not found' })
+    return res.status(404).json({ error: 'Product not found' })
   }
 
-  res.json({
-    ...result.rows[0],
-    items: JSON.parse(result.rows[0].items_json)
-  })
+  lastScannedProduct = { ...result.rows[0], timestamp: Date.now() }
+  res.json({ success: true, product: result.rows[0] })
+})
+
+// UPDATE a product (name and price; the barcode stays fixed)
+router.put('/:id', async (req, res) => {
+  const { name, price } = req.body
+
+  if (!name || !price) {
+    return res.status(400).json({ error: 'Name and price are required' })
+  }
+
+  if (isNaN(price) || price <= 0) {
+    return res.status(400).json({ error: 'Price must be a positive number' })
+  }
+
+  const result = await db.query(
+    'UPDATE products SET name = $1, price = $2 WHERE id = $3 RETURNING *',
+    [name, parseFloat(price), req.params.id]
+  )
+
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: 'Product not found' })
+  }
+
+  res.json({ message: 'Product updated successfully', product: result.rows[0] })
+})
+
+// DELETE a product
+router.delete('/:id', async (req, res) => {
+  const result = await db.query(
+    'DELETE FROM products WHERE id = $1 RETURNING id',
+    [req.params.id]
+  )
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: 'Product not found' })
+  }
+  res.json({ message: 'Product deleted successfully' })
 })
 
 module.exports = router
