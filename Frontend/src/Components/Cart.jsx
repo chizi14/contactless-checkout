@@ -1,4 +1,4 @@
-function Cart({ cart, total, onRemove, onClear }) {
+function Cart({ cart, total, onRemove, onClear, onIncrement, onDecrement }) {
   return (
     <div className="flex flex-col h-full">
 
@@ -49,6 +49,19 @@ function Cart({ cart, total, onRemove, onClear }) {
                   <p className="text-text-muted text-xs">
                     MWK {item.price.toLocaleString()} × {item.quantity}
                   </p>
+                                    <div className="flex items-center gap-2 mt-2">
+                    <button
+                      onClick={() => onDecrement(item.barcode)}
+                      className="w-7 h-7 rounded-full bg-secondary border border-border text-text-primary font-bold hover:opacity-80"
+                    >−</button>
+                    <span className="w-6 text-center text-sm font-semibold text-text-primary">
+                      {item.quantity}
+                    </span>
+                    <button
+                      onClick={() => onIncrement(item.barcode)}
+                      className="w-7 h-7 rounded-full bg-accent text-white font-bold hover:opacity-80"
+                    >+</button>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <p className="text-text-primary text-sm font-semibold">

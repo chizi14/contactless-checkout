@@ -32,6 +32,14 @@ function Kiosk() {
     setCart(prev => prev.filter(i => i.barcode !== barcode))
   }
 
+    const updateQuantity = (barcode, change) => {
+    setCart(prev =>
+      prev
+        .map(i => i.barcode === barcode ? { ...i, quantity: i.quantity + change } : i)
+        .filter(i => i.quantity > 0)
+    )
+  }
+
   const clearCart = () => {
     setCart([])
     setPaymentState('idle')
@@ -211,6 +219,8 @@ function Kiosk() {
               total={total}
               onRemove={removeFromCart}
               onClear={clearCart}
+              onIncrement={(b) => updateQuantity(b, 1)}
+              onDecrement={(b) => updateQuantity(b, -1)}
             />
           </div>
 
