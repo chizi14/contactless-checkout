@@ -28,6 +28,7 @@ function Admin() {
   // Card form state
   const [cardForm, setCardForm] = useState({ uid: "", owner_name: "" });
   const [cardMsg, setCardMsg] = useState("");
+  const [topupAmounts, setTopupAmounts] = useState({});
 
   const navigate = useNavigate();
 
@@ -100,6 +101,21 @@ function Admin() {
     }
   };
 
+    const handleTopUp = async (cardId) => {
+    const amount = Number(topupAmounts[cardId]);
+    if (!amount || amount <= 0) {
+      setCardMsg("Enter a valid top-up amount");
+      return;
+    }
+    try {
+      await api.post(`/cards/${cardId}/topup`, { amount });
+      setCardMsg("Top-up successful");
+      setTopupAmounts((prev) => ({ ...prev, [cardId]: "" }));
+      fetchAll();
+    } catch (err) {
+      setCardMsg("Top-up failed");
+    }
+  };
   const handleLogout = () => {
     localStorage.removeItem("admin_auth");
     navigate("/login");
@@ -444,12 +460,29 @@ function Admin() {
                               {new Date(c.registered_at).toLocaleString()}
                             </p>
                           </div>
-                          <span
-                            className="text-xs bg-accent-lighter text-accent
-                                           px-2 py-0.5 rounded-full font-medium"
-                          >
-                            Active
-                          </span>
+                                                    <div className="flex items-center gap-3">
+                            <span className="text-text-primary text-sm font-semibold">
+                              MWK {Number(c.balance).toLocaleString()}
+                            </span>
+                            <input
+                              type="number"
+                              placeholder="Amount"
+                              value={topupAmounts[c.id] || ""}
+                              onChange={(e) =>
+                                setTopupAmounts((prev) => ({
+                                  ...prev,
+                                  [c.id]: e.target.value,
+                                }))
+                              }
+                              className="bg-surface text-gray-900 placeholder-gray-400 w-28 px-3 py-1.5 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-accent-light"
+                            />
+                            <button
+                              onClick={() => handleTopUp(c.id)}
+                              className="bg-accent text-white text-xs font-medium px-3 py-2 rounded-lg hover:bg-accent-light transition-colors"
+                            >
+                              Top Up
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>

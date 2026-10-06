@@ -74,9 +74,29 @@ router.get('/latest-tap', (req, res) => {
 
 router.get('/', async (req, res) => {
   const result = await db.query(
-    'SELECT id, owner_name, registered_at FROM cards'
+    'SELECT id, owner_name, balance, registered_at FROM cards ORDER BY id'
   )
   res.json(result.rows)
+})
+
+
+router.post('/:id/topup', async (req, res) => {
+  const amount = Number(req.body.amount)
+
+  if (!amount || amount <= 0) {
+    return res.status(400).json({ error: 'Enter a valid amount' })
+  }
+
+  const result = await db.query(
+    'UPDATE cards SET balance = balance + $1 WHERE id = $2 RETURNING id, owner_name, balance',
+    [amount, req.params.id]
+  )
+
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: 'Card not found' })
+  }
+
+  res.json({ message: 'Top-up successful', card: result.rows[0] })
 })
 
 module.exports = router
