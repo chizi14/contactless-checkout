@@ -35,6 +35,7 @@ router.post('/', async (req, res) => {
     owner: cardResult.rows[0].owner_name,
     total_amount: parseFloat(total_amount),
     items: items,
+    created_at: result.rows[0].created_at,
     status: 'approved'
   })
 })

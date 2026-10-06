@@ -57,6 +57,39 @@ function PaymentStatus({ state, data, onReset }) {
             Transaction ID: #{data?.transaction_id}
           </p>
 
+                    <button
+            onClick={() => window.print()}
+            className="w-full border border-border text-text-primary font-semibold py-3 rounded-xl hover:opacity-80 transition-opacity mb-3"
+          >
+            Print Receipt
+          </button>
+
+          <div id="receipt" style={{ fontFamily: 'monospace', fontSize: '12px', color: '#000' }}>
+            <p style={{ textAlign: 'center', fontWeight: 'bold', fontSize: '16px' }}>
+              CONTACTLESS SELF CHECKOUT
+            </p>
+            <p style={{ textAlign: 'center' }}>Demo Store</p>
+            <hr />
+            <p>Receipt No: RCP-{String(data?.transaction_id).padStart(6, '0')}</p>
+            <p>Date: {new Date(data?.created_at).toLocaleString('en-GB')}</p>
+            <p>Customer: {data?.owner}</p>
+            <p>Payment: RFID Card</p>
+            <hr />
+            {data?.items?.map((item, index) => (
+              <div key={index} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>{item.name} x{item.quantity}</span>
+                <span>MWK {(item.price * item.quantity).toLocaleString()}</span>
+              </div>
+            ))}
+            <hr />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+              <span>TOTAL</span>
+              <span>MWK {data?.total_amount?.toLocaleString()}</span>
+            </div>
+            <hr />
+            <p style={{ textAlign: 'center' }}>Thank you for shopping with us!</p>
+          </div>
+
           <button
             onClick={onReset}
             className="w-full bg-accent text-white font-semibold py-3 

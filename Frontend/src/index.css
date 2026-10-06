@@ -14,3 +14,24 @@ body {
   color: #ffffff;
   font-family: Inter, system-ui, sans-serif;
 }
+
+#receipt {
+  display: none;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #receipt,
+  #receipt * {
+    visibility: visible;
+  }
+  #receipt {
+    display: block;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 80mm;
+  }
+}
