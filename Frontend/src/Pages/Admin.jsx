@@ -17,7 +17,7 @@ function Admin() {
   const [cards, setCards] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Product form state
+  // Product state
   const [productForm, setProductForm] = useState({
     barcode: "",
     name: "",
@@ -27,10 +27,12 @@ function Admin() {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({ name: "", price: "" });
 
-  // Card form state
+  // Card state
   const [cardForm, setCardForm] = useState({ uid: "", owner_name: "" });
   const [cardMsg, setCardMsg] = useState("");
   const [topupAmounts, setTopupAmounts] = useState({});
+  const [editingCardId, setEditingCardId] = useState(null);
+  const [cardEditName, setCardEditName] = useState("");
 
   const navigate = useNavigate();
 
@@ -57,6 +59,7 @@ function Admin() {
     setLoading(false);
   };
 
+  // ---------- Products ----------
   const handleAddProduct = async () => {
     if (!productForm.barcode || !productForm.name || !productForm.price) {
       setProductMsg("All fields are required");
@@ -73,15 +76,6 @@ function Admin() {
       fetchAll();
     } catch (err) {
       setProductMsg("Failed to add product. Barcode may already exist.");
-    }
-  };
-
-  const handleDeleteProduct = async (id) => {
-    try {
-      await api.delete(`/products/${id}`);
-      setProducts((prev) => prev.filter((p) => p.id !== id));
-    } catch (err) {
-      console.error("Delete error:", err);
     }
   };
 
@@ -108,6 +102,18 @@ function Admin() {
     }
   };
 
+  const handleDeleteProduct = async (id) => {
+    if (!window.confirm("Delete this product?")) return;
+    try {
+      await api.delete(`/products/${id}`);
+      setProductMsg("Product deleted successfully");
+      fetchAll();
+    } catch (err) {
+      setProductMsg("Failed to delete product");
+    }
+  };
+
+  // ---------- Cards ----------
   const handleRegisterCard = async () => {
     if (!cardForm.uid || !cardForm.owner_name) {
       setCardMsg("All fields are required");
@@ -142,25 +148,69 @@ function Admin() {
     }
   };
 
+  const startCardEdit = (c) => {
+    setEditingCardId(c.id);
+    setCardEditName(c.owner_name);
+  };
+
+  const handleRenameCard = async (id) => {
+    if (!cardEditName.trim()) {
+      setCardMsg("Owner name is required");
+      return;
+    }
+    try {
+      await api.put(`/cards/${id}`, { owner_name: cardEditName });
+      setCardMsg("Card renamed successfully");
+      setEditingCardId(null);
+      fetchAll();
+    } catch (err) {
+      setCardMsg("Failed to rename card");
+    }
+  };
+
+  const handleToggleBlock = async (c) => {
+    const next = c.status === "blocked" ? "active" : "blocked";
+    try {
+      await api.patch(`/cards/${c.id}/status`, { status: next });
+      setCardMsg(`Card ${next} successfully`);
+      fetchAll();
+    } catch (err) {
+      setCardMsg("Failed to change card status");
+    }
+  };
+
+  const handleDeleteCard = async (id) => {
+    if (!window.confirm("Delete this card?")) return;
+    try {
+      await api.delete(`/cards/${id}`);
+      setCardMsg("Card deleted successfully");
+      fetchAll();
+    } catch (err) {
+      setCardMsg(err.response?.data?.error || "Failed to delete card");
+    }
+  };
+
   const handleLogout = () => {
     localStorage.removeItem("admin_auth");
     navigate("/login");
   };
 
-  const chartData = transactions.slice(0, 7).map((t, i) => ({
+  const chartData = transactions.slice(0, 7).map((t) => ({
     name: `#${t.id}`,
     amount: t.total_amount,
   }));
 
   const tabs = ["transactions", "products", "cards"];
 
+  const inputClass =
+    "bg-surface text-gray-900 placeholder-gray-400 px-4 py-2.5 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-accent-light cursor-text";
+  const smallInputClass =
+    "bg-surface text-gray-900 placeholder-gray-400 px-3 py-1.5 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-accent-light";
+
   return (
     <div className="min-h-screen bg-primary">
       {/* Header */}
-      <header
-        className="bg-secondary border-b border-border px-6 py-4
-                         flex items-center justify-between shadow-card"
-      >
+      <header className="bg-secondary border-b border-border px-6 py-4 flex items-center justify-between shadow-card">
         <div>
           <h1 className="text-text-primary font-bold text-lg">Admin Panel</h1>
           <p className="text-text-muted text-xs">Contactless Checkout System</p>
@@ -168,15 +218,13 @@ function Admin() {
         <div className="flex items-center gap-4">
           <button
             onClick={() => navigate("/")}
-            className="text-text-secondary text-sm hover:text-text-primary
-                       transition-colors"
+            className="text-text-secondary text-sm hover:text-text-primary transition-colors"
           >
             Kiosk View
           </button>
           <button
             onClick={handleLogout}
-            className="bg-danger text-white text-sm px-4 py-2 rounded-lg
-                       hover:opacity-90 transition-opacity"
+            className="bg-danger text-white text-sm px-4 py-2 rounded-lg hover:opacity-90 transition-opacity"
           >
             Logout
           </button>
@@ -193,13 +241,9 @@ function Admin() {
           ].map((stat) => (
             <div
               key={stat.label}
-              className="bg-secondary rounded-xl p-5 border border-border
-                            shadow-card"
+              className="bg-secondary rounded-xl p-5 border border-border shadow-card"
             >
-              <p
-                className="text-text-muted text-xs font-medium uppercase
-                            tracking-wide mb-1"
-              >
+              <p className="text-text-muted text-xs font-medium uppercase tracking-wide mb-1">
                 {stat.label}
               </p>
               <p className="text-text-primary text-3xl font-bold">
@@ -215,12 +259,11 @@ function Admin() {
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium capitalize
-                          transition-colors ${
-                            activeTab === tab
-                              ? "bg-accent text-white"
-                              : "bg-secondary text-text-secondary border border-border hover:text-text-primary"
-                          }`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium capitalize transition-colors ${
+                activeTab === tab
+                  ? "bg-accent text-white"
+                  : "bg-secondary text-text-secondary border border-border hover:text-text-primary"
+              }`}
             >
               {tab}
             </button>
@@ -274,8 +317,7 @@ function Admin() {
                       {transactions.map((t) => (
                         <div
                           key={t.id}
-                          className="px-5 py-4 flex items-center
-                                                    justify-between"
+                          className="px-5 py-4 flex items-center justify-between"
                         >
                           <div>
                             <p className="text-text-primary text-sm font-medium">
@@ -290,10 +332,7 @@ function Admin() {
                             <p className="text-accent font-bold">
                               MWK {t.total_amount.toLocaleString()}
                             </p>
-                            <span
-                              className="text-xs bg-success-light text-accent
-                                             px-2 py-0.5 rounded-full"
-                            >
+                            <span className="text-xs bg-success-light text-accent px-2 py-0.5 rounded-full">
                               {t.status}
                             </span>
                           </div>
@@ -327,10 +366,7 @@ function Admin() {
                             [field]: e.target.value,
                           }))
                         }
-                        className="bg-surface text-gray-900 placeholder-gray-400
-                                   px-4 py-2.5 rounded-lg border border-border
-                                   text-sm focus:outline-none focus:ring-2
-                                   focus:ring-accent-light cursor-text"
+                        className={inputClass}
                       />
                     ))}
                   </div>
@@ -347,8 +383,7 @@ function Admin() {
                   )}
                   <button
                     onClick={handleAddProduct}
-                    className="bg-accent text-white text-sm font-medium px-5
-                               py-2.5 rounded-lg hover:bg-accent-light transition-colors"
+                    className="bg-accent text-white text-sm font-medium px-5 py-2.5 rounded-lg hover:bg-accent-light transition-colors"
                   >
                     Add Product
                   </button>
@@ -369,8 +404,7 @@ function Admin() {
                       {products.map((p) => (
                         <div
                           key={p.id}
-                          className="px-5 py-3 flex items-center
-                                                    justify-between"
+                          className="px-5 py-3 flex items-center justify-between"
                         >
                           <div>
                             <p className="text-text-primary text-sm font-medium">
@@ -391,7 +425,7 @@ function Admin() {
                                     name: e.target.value,
                                   }))
                                 }
-                                className="bg-surface text-gray-900 w-40 px-3 py-1.5 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-accent-light"
+                                className={`${smallInputClass} w-40`}
                               />
                               <input
                                 type="number"
@@ -402,7 +436,7 @@ function Admin() {
                                     price: e.target.value,
                                   }))
                                 }
-                                className="bg-surface text-gray-900 w-24 px-3 py-1.5 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-accent-light"
+                                className={`${smallInputClass} w-24`}
                               />
                               <button
                                 onClick={() => handleUpdateProduct(p.id)}
@@ -424,13 +458,13 @@ function Admin() {
                               </p>
                               <button
                                 onClick={() => startEdit(p)}
-                                className="text-accent text-xs font-medium hover:opacity-70 transition-opacity"
+                                className="text-accent text-xs font-medium hover:opacity-70"
                               >
                                 Edit
                               </button>
                               <button
                                 onClick={() => handleDeleteProduct(p.id)}
-                                className="text-danger text-xs hover:opacity-70 transition-opacity"
+                                className="text-danger text-xs hover:opacity-70"
                               >
                                 Delete
                               </button>
@@ -462,10 +496,7 @@ function Admin() {
                           uid: e.target.value,
                         }))
                       }
-                      className="bg-surface text-gray-900 placeholder-gray-400
-                                 px-4 py-2.5 rounded-lg border border-border
-                                 text-sm focus:outline-none focus:ring-2
-                                 focus:ring-accent-light cursor-text"
+                      className={inputClass}
                     />
                     <input
                       type="text"
@@ -477,10 +508,7 @@ function Admin() {
                           owner_name: e.target.value,
                         }))
                       }
-                      className="bg-surface text-gray-900 placeholder-gray-400
-                                 px-4 py-2.5 rounded-lg border border-border
-                                 text-sm focus:outline-none focus:ring-2
-                                 focus:ring-accent-light cursor-text"
+                      className={inputClass}
                     />
                   </div>
                   {cardMsg && (
@@ -496,8 +524,7 @@ function Admin() {
                   )}
                   <button
                     onClick={handleRegisterCard}
-                    className="bg-accent text-white text-sm font-medium px-5
-                               py-2.5 rounded-lg hover:bg-accent-light transition-colors"
+                    className="bg-accent text-white text-sm font-medium px-5 py-2.5 rounded-lg hover:bg-accent-light transition-colors"
                   >
                     Register Card
                   </button>
@@ -518,19 +545,55 @@ function Admin() {
                       {cards.map((c) => (
                         <div
                           key={c.id}
-                          className="px-5 py-3 flex items-center
-                                                    justify-between"
+                          className="px-5 py-3 flex flex-wrap items-center justify-between gap-3"
                         >
                           <div>
-                            <p className="text-text-primary text-sm font-medium">
-                              {c.owner_name}
-                            </p>
+                            {editingCardId === c.id ? (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={cardEditName}
+                                  onChange={(e) =>
+                                    setCardEditName(e.target.value)
+                                  }
+                                  className={`${smallInputClass} w-48`}
+                                />
+                                <button
+                                  onClick={() => handleRenameCard(c.id)}
+                                  className="text-accent text-xs font-medium hover:opacity-70"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  onClick={() => setEditingCardId(null)}
+                                  className="text-text-muted text-xs hover:opacity-70"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <p className="text-text-primary text-sm font-medium">
+                                  {c.owner_name}
+                                </p>
+                                <span
+                                  className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                    c.status === "blocked"
+                                      ? "bg-danger-light text-danger"
+                                      : "bg-accent-lighter text-accent"
+                                  }`}
+                                >
+                                  {c.status === "blocked" ? "Blocked" : "Active"}
+                                </span>
+                              </div>
+                            )}
                             <p className="text-text-muted text-xs mt-0.5">
                               Registered:{" "}
                               {new Date(c.registered_at).toLocaleString()}
                             </p>
                           </div>
-                          <div className="flex items-center gap-3">
+
+                          <div className="flex flex-wrap items-center gap-3">
                             <span className="text-text-primary text-sm font-semibold">
                               MWK {Number(c.balance || 0).toLocaleString()}
                             </span>
@@ -544,13 +607,31 @@ function Admin() {
                                   [c.id]: e.target.value,
                                 }))
                               }
-                              className="bg-surface text-gray-900 placeholder-gray-400 w-28 px-3 py-1.5 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-accent-light"
+                              className={`${smallInputClass} w-28`}
                             />
                             <button
                               onClick={() => handleTopUp(c.id)}
                               className="bg-accent text-white text-xs font-medium px-3 py-2 rounded-lg hover:bg-accent-light transition-colors"
                             >
                               Top Up
+                            </button>
+                            <button
+                              onClick={() => startCardEdit(c)}
+                              className="text-accent text-xs font-medium hover:opacity-70"
+                            >
+                              Rename
+                            </button>
+                            <button
+                              onClick={() => handleToggleBlock(c)}
+                              className="text-text-secondary text-xs font-medium hover:opacity-70"
+                            >
+                              {c.status === "blocked" ? "Unblock" : "Block"}
+                            </button>
+                            <button
+                              onClick={() => handleDeleteCard(c.id)}
+                              className="text-danger text-xs hover:opacity-70"
+                            >
+                              Delete
                             </button>
                           </div>
                         </div>
