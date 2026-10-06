@@ -10,6 +10,9 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
+// Safe money formatter: never crashes if a value is missing
+const money = (n) => Number(n || 0).toLocaleString();
+
 function Admin() {
   const [activeTab, setActiveTab] = useState("transactions");
   const [transactions, setTransactions] = useState([]);
@@ -197,7 +200,7 @@ function Admin() {
 
   const chartData = transactions.slice(0, 7).map((t) => ({
     name: `#${t.id}`,
-    amount: t.total_amount,
+    amount: Number(t.total_amount || 0),
   }));
 
   const tabs = ["transactions", "products", "cards"];
@@ -288,7 +291,7 @@ function Admin() {
                         <YAxis tick={{ fontSize: 12 }} />
                         <Tooltip
                           formatter={(value) => [
-                            `MWK ${value.toLocaleString()}`,
+                            `MWK ${money(value)}`,
                             "Amount",
                           ]}
                         />
@@ -330,7 +333,7 @@ function Admin() {
                           </div>
                           <div className="text-right">
                             <p className="text-accent font-bold">
-                              MWK {t.total_amount.toLocaleString()}
+                              MWK {money(t.total_amount)}
                             </p>
                             <span className="text-xs bg-success-light text-accent px-2 py-0.5 rounded-full">
                               {t.status}
@@ -454,7 +457,7 @@ function Admin() {
                           ) : (
                             <div className="flex items-center gap-4">
                               <p className="text-text-primary font-semibold text-sm">
-                                MWK {p.price.toLocaleString()}
+                                MWK {money(p.price)}
                               </p>
                               <button
                                 onClick={() => startEdit(p)}
@@ -595,7 +598,7 @@ function Admin() {
 
                           <div className="flex flex-wrap items-center gap-3">
                             <span className="text-text-primary text-sm font-semibold">
-                              MWK {Number(c.balance || 0).toLocaleString()}
+                              MWK {money(c.balance)}
                             </span>
                             <input
                               type="number"
