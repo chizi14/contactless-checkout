@@ -24,6 +24,8 @@ function Admin() {
     price: "",
   });
   const [productMsg, setProductMsg] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({ name: "", price: "" });
 
   // Card form state
   const [cardForm, setCardForm] = useState({ uid: "", owner_name: "" });
@@ -75,13 +77,36 @@ function Admin() {
   };
 
   const handleDeleteProduct = async (id) => {
-  try {
-    await api.delete(`/products/${id}`)
-    setProducts(prev => prev.filter(p => p.id !== id))
-  } catch (err) {
-    console.error('Delete error:', err)
-  }
-}
+    try {
+      await api.delete(`/products/${id}`);
+      setProducts((prev) => prev.filter((p) => p.id !== id));
+    } catch (err) {
+      console.error("Delete error:", err);
+    }
+  };
+
+  const startEdit = (p) => {
+    setEditingId(p.id);
+    setEditForm({ name: p.name, price: String(p.price) });
+  };
+
+  const handleUpdateProduct = async (id) => {
+    if (!editForm.name || !editForm.price) {
+      setProductMsg("Name and price are required");
+      return;
+    }
+    try {
+      await api.put(`/products/${id}`, {
+        name: editForm.name,
+        price: parseFloat(editForm.price),
+      });
+      setProductMsg("Product updated successfully");
+      setEditingId(null);
+      fetchAll();
+    } catch (err) {
+      setProductMsg("Failed to update product");
+    }
+  };
 
   const handleRegisterCard = async () => {
     if (!cardForm.uid || !cardForm.owner_name) {
@@ -101,7 +126,7 @@ function Admin() {
     }
   };
 
-    const handleTopUp = async (cardId) => {
+  const handleTopUp = async (cardId) => {
     const amount = Number(topupAmounts[cardId]);
     if (!amount || amount <= 0) {
       setCardMsg("Enter a valid top-up amount");
@@ -116,6 +141,7 @@ function Admin() {
       setCardMsg("Top-up failed");
     }
   };
+
   const handleLogout = () => {
     localStorage.removeItem("admin_auth");
     navigate("/login");
@@ -354,18 +380,62 @@ function Admin() {
                               Barcode: {p.barcode}
                             </p>
                           </div>
-                          <div className="flex items-center gap-4">
-                            <p className="text-text-primary font-semibold text-sm">
-                              MWK {p.price.toLocaleString()}
-                            </p>
-                            <button
-                              onClick={() => handleDeleteProduct(p.id)}
-                              className="text-danger text-xs hover:opacity-70
-                                         transition-opacity"
-                            >
-                              Delete
-                            </button>
-                          </div>
+                          {editingId === p.id ? (
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={editForm.name}
+                                onChange={(e) =>
+                                  setEditForm((prev) => ({
+                                    ...prev,
+                                    name: e.target.value,
+                                  }))
+                                }
+                                className="bg-surface text-gray-900 w-40 px-3 py-1.5 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-accent-light"
+                              />
+                              <input
+                                type="number"
+                                value={editForm.price}
+                                onChange={(e) =>
+                                  setEditForm((prev) => ({
+                                    ...prev,
+                                    price: e.target.value,
+                                  }))
+                                }
+                                className="bg-surface text-gray-900 w-24 px-3 py-1.5 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-accent-light"
+                              />
+                              <button
+                                onClick={() => handleUpdateProduct(p.id)}
+                                className="text-accent text-xs font-medium hover:opacity-70"
+                              >
+                                Save
+                              </button>
+                              <button
+                                onClick={() => setEditingId(null)}
+                                className="text-text-muted text-xs hover:opacity-70"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-4">
+                              <p className="text-text-primary font-semibold text-sm">
+                                MWK {p.price.toLocaleString()}
+                              </p>
+                              <button
+                                onClick={() => startEdit(p)}
+                                className="text-accent text-xs font-medium hover:opacity-70 transition-opacity"
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDeleteProduct(p.id)}
+                                className="text-danger text-xs hover:opacity-70 transition-opacity"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -460,9 +530,9 @@ function Admin() {
                               {new Date(c.registered_at).toLocaleString()}
                             </p>
                           </div>
-                                                    <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-3">
                             <span className="text-text-primary text-sm font-semibold">
-                              MWK {Number(c.balance).toLocaleString()}
+                              MWK {Number(c.balance || 0).toLocaleString()}
                             </span>
                             <input
                               type="number"
