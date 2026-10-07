@@ -45,7 +45,11 @@ router.post('/verify', async (req, res) => {
     const matchedCard = cards.find(card => bcrypt.compareSync(uid, card.uid_hash))
 
     if (!matchedCard) {
-      lastVerifiedCard = { verified: false, timestamp: Date.now() }
+      lastVerifiedCard = {
+        verified: false,
+        message: 'Card not recognised',
+        timestamp: Date.now()
+      }
       return res.status(404).json({
         verified: false,
         message: 'Card not recognised'
@@ -53,7 +57,11 @@ router.post('/verify', async (req, res) => {
     }
 
     if (matchedCard.status === 'blocked') {
-      lastVerifiedCard = { verified: false, timestamp: Date.now() }
+      lastVerifiedCard = {
+        verified: false,
+        message: 'This card is blocked',
+        timestamp: Date.now()
+      }
       return res.status(403).json({
         verified: false,
         message: 'Card is blocked'
@@ -84,6 +92,12 @@ router.get('/latest-tap', (req, res) => {
   }
   const tap = lastVerifiedCard
   lastVerifiedCard = null
+
+  // Ignore taps older than 15 seconds so an old tap can never pay for a new cart
+  if (Date.now() - tap.timestamp > 15000) {
+    return res.status(404).json({ error: 'Tap expired' })
+  }
+
   res.json(tap)
 })
 

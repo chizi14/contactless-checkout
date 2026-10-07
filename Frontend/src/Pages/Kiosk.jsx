@@ -9,6 +9,7 @@ function Kiosk() {
   const [paymentState, setPaymentState] = useState('idle')
   const [transactionData, setTransactionData] = useState(null)
   const [error, setError] = useState('')
+  const [denyMessage, setDenyMessage] = useState('')
   const navigate = useNavigate()
 
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
@@ -32,7 +33,7 @@ function Kiosk() {
     setCart(prev => prev.filter(i => i.barcode !== barcode))
   }
 
-    const updateQuantity = (barcode, change) => {
+  const updateQuantity = (barcode, change) => {
     setCart(prev =>
       prev
         .map(i => i.barcode === barcode ? { ...i, quantity: i.quantity + change } : i)
@@ -44,7 +45,14 @@ function Kiosk() {
     setCart([])
     setPaymentState('idle')
     setTransactionData(null)
+    setDenyMessage('')
     setError('')
+  }
+
+  // After a decline: keep the cart and let the customer try again
+  const retryPayment = () => {
+    setPaymentState('idle')
+    setDenyMessage('')
   }
 
   const handlePayment = async (cardData) => {
@@ -55,22 +63,23 @@ function Kiosk() {
 
     setPaymentState('processing')
 
-    try {
-      if (!cardData.verified) {
-        setPaymentState('denied')
-        return
-      }
+    // The tap itself was rejected (unknown or blocked card)
+    if (!cardData.verified) {
+      setDenyMessage(cardData.message || 'Card not recognised')
+      setPaymentState('denied')
+      return
+    }
 
+    try {
+      // Send only barcodes and quantities. The SERVER works out the total.
       const items = cart.map(i => ({
-        name: i.name,
-        price: i.price,
+        barcode: i.barcode,
         quantity: i.quantity
       }))
 
       const transactionRes = await api.post('/transactions', {
         card_id: cardData.card_id,
-        items,
-        total_amount: total
+        items
       })
 
       setTransactionData({
@@ -78,8 +87,16 @@ function Kiosk() {
         ...transactionRes.data
       })
       setPaymentState('approved')
-
     } catch (err) {
+      const data = err.response?.data
+      if (data?.reason === 'insufficient_funds') {
+        setDenyMessage(
+          `Insufficient balance. Total is MWK ${Number(data.total).toLocaleString()}, ` +
+          `card has MWK ${Number(data.balance).toLocaleString()}.`
+        )
+      } else {
+        setDenyMessage(data?.message || 'Could not reach the server. Please try again.')
+      }
       setPaymentState('denied')
     }
   }
@@ -154,7 +171,9 @@ function Kiosk() {
         <PaymentStatus
           state={paymentState}
           data={transactionData}
+          message={denyMessage}
           onReset={clearCart}
+          onRetry={retryPayment}
         />
       ) : (
         <div className="flex h-[calc(100vh-65px)]">

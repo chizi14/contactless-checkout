@@ -1,10 +1,8 @@
-function PaymentStatus({ state, data, onReset }) {
+function PaymentStatus({ state, data, message, onReset, onRetry }) {
   if (state === 'processing') {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-65px)]">
-        <div className="w-20 h-20 border-4 border-accent-lighter border-t-accent 
-                        rounded-full animate-spin mb-6">
-        </div>
+        <div className="w-20 h-20 border-4 border-accent-lighter border-t-accent rounded-full animate-spin mb-6"></div>
         <p className="text-text-primary font-semibold text-xl">Processing Payment</p>
         <p className="text-text-muted text-sm mt-2">Verifying card...</p>
       </div>
@@ -13,17 +11,12 @@ function PaymentStatus({ state, data, onReset }) {
 
   if (state === 'approved') {
     return (
-      <div className="flex flex-col items-center justify-center 
-                      h-[calc(100vh-65px)] px-4">
-        <div className="bg-secondary rounded-2xl shadow-elevated border 
-                        border-border w-full max-w-md p-8 text-center">
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-65px)] px-4">
+        <div className="bg-secondary rounded-2xl shadow-elevated border border-border w-full max-w-md p-8 text-center">
 
-          <div className="w-20 h-20 bg-success-light rounded-full flex items-center 
-                          justify-center mx-auto mb-6">
-            <svg className="w-10 h-10 text-accent" fill="none"
-                 stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-                    d="M5 13l4 4L19 7" />
+          <div className="w-20 h-20 bg-success-light rounded-full flex items-center justify-center mx-auto mb-6">
+            <svg className="w-10 h-10 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
             </svg>
           </div>
 
@@ -51,13 +44,19 @@ function PaymentStatus({ state, data, onReset }) {
                 MWK {data?.total_amount?.toLocaleString()}
               </span>
             </div>
+            <div className="flex justify-between">
+              <span className="text-text-muted text-sm">Remaining balance</span>
+              <span className="text-text-secondary text-sm font-medium">
+                MWK {Number(data?.balance_after || 0).toLocaleString()}
+              </span>
+            </div>
           </div>
 
           <p className="text-text-muted text-xs mb-6">
             Transaction ID: #{data?.transaction_id}
           </p>
 
-                    <button
+          <button
             onClick={() => window.print()}
             className="w-full border border-border text-text-primary font-semibold py-3 rounded-xl hover:opacity-80 transition-opacity mb-3"
           >
@@ -86,14 +85,17 @@ function PaymentStatus({ state, data, onReset }) {
               <span>TOTAL</span>
               <span>MWK {data?.total_amount?.toLocaleString()}</span>
             </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span>Balance left</span>
+              <span>MWK {Number(data?.balance_after || 0).toLocaleString()}</span>
+            </div>
             <hr />
             <p style={{ textAlign: 'center' }}>Thank you for shopping with us!</p>
           </div>
 
           <button
             onClick={onReset}
-            className="w-full bg-accent text-white font-semibold py-3 
-                       rounded-xl hover:bg-accent-light transition-colors"
+            className="w-full bg-accent text-white font-semibold py-3 rounded-xl hover:bg-accent-light transition-colors"
           >
             New Transaction
           </button>
@@ -104,17 +106,12 @@ function PaymentStatus({ state, data, onReset }) {
 
   if (state === 'denied') {
     return (
-      <div className="flex flex-col items-center justify-center 
-                      h-[calc(100vh-65px)] px-4">
-        <div className="bg-secondary rounded-2xl shadow-elevated border 
-                        border-border w-full max-w-md p-8 text-center">
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-65px)] px-4">
+        <div className="bg-secondary rounded-2xl shadow-elevated border border-border w-full max-w-md p-8 text-center">
 
-          <div className="w-20 h-20 bg-danger-light rounded-full flex items-center 
-                          justify-center mx-auto mb-6">
-            <svg className="w-10 h-10 text-danger" fill="none"
-                 stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-                    d="M6 18L18 6M6 6l12 12" />
+          <div className="w-20 h-20 bg-danger-light rounded-full flex items-center justify-center mx-auto mb-6">
+            <svg className="w-10 h-10 text-danger" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </div>
 
@@ -122,20 +119,27 @@ function PaymentStatus({ state, data, onReset }) {
             Payment Denied
           </h2>
           <p className="text-text-muted text-sm mb-6">
-            Card not recognised. Please use a registered card.
+            {message || 'Payment could not be completed.'}
           </p>
 
           <button
-            onClick={onReset}
-            className="w-full bg-danger text-white font-semibold py-3 
-                       rounded-xl hover:opacity-90 transition-opacity"
+            onClick={onRetry}
+            className="w-full bg-danger text-white font-semibold py-3 rounded-xl hover:opacity-90 transition-opacity mb-3"
           >
             Try Again
+          </button>
+          <button
+            onClick={onReset}
+            className="w-full border border-border text-text-secondary font-medium py-3 rounded-xl hover:opacity-80 transition-opacity"
+          >
+            Cancel and Clear Cart
           </button>
         </div>
       </div>
     )
   }
+
+  return null
 }
 
 export default PaymentStatus

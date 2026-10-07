@@ -198,7 +198,10 @@ function Admin() {
     navigate("/login");
   };
 
-  const chartData = transactions.slice(0, 7).map((t) => ({
+  const chartData = transactions
+    .filter((t) => t.status === "approved")
+    .slice(0, 7)
+    .map((t) => ({
     name: `#${t.id}`,
     amount: Number(t.total_amount || 0),
   }));
@@ -335,7 +338,13 @@ function Admin() {
                             <p className="text-accent font-bold">
                               MWK {money(t.total_amount)}
                             </p>
-                            <span className="text-xs bg-success-light text-accent px-2 py-0.5 rounded-full">
+                            <span
+                              className={`text-xs px-2 py-0.5 rounded-full ${
+                                t.status === "approved"
+                                  ? "bg-success-light text-accent"
+                                  : "bg-danger-light text-danger"
+                              }`}
+                            >
                               {t.status}
                             </span>
                           </div>
