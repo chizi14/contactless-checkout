@@ -49,12 +49,12 @@ router.post('/', async (req, res) => {
         message: `Product ${i.barcode} was not found`
       })
     }
-    lines.push({ name: product.name, price: product.price, quantity: i.quantity })
+    lines.push({ barcode: i.barcode, name: product.name, price: product.price, quantity: i.quantity })
     total += product.price * i.quantity
   }
   total = Math.round(total * 100) / 100
 
-  // 2. Check the card and take the money in ONE safe step
+  // 2. Check the card and stock, and take the money/stock in ONE safe step
   const client = await db.connect()
   try {
     await client.query('BEGIN')
@@ -79,7 +79,7 @@ router.post('/', async (req, res) => {
     const balance = Number(card.balance)
 
     // Declined: save a record of the attempt, then tell the kiosk why
-    const decline = async (httpStatus, reason, message) => {
+    const decline = async (httpStatus, reason, message, extra = {}) => {
       await client.query(
         `INSERT INTO transactions (card_id, total_amount, items_json, status)
          VALUES ($1, $2, $3, 'declined')`,
@@ -91,7 +91,8 @@ router.post('/', async (req, res) => {
         reason,
         message,
         balance,
-        total
+        total,
+        ...extra
       })
     }
 
@@ -101,6 +102,27 @@ router.post('/', async (req, res) => {
 
     if (balance < total) {
       return await decline(402, 'insufficient_funds', 'Insufficient balance')
+    }
+
+    // Take stock for each item ONE AT A TIME. The WHERE clause only succeeds
+    // if there's enough stock left, so this can't be tricked by two sales
+    // happening at the same moment (Postgres locks the row during the update).
+    for (const line of lines) {
+      const stockUpdate = await client.query(
+        `UPDATE products SET stock = stock - $1
+         WHERE barcode = $2 AND stock >= $1
+         RETURNING stock`,
+        [line.quantity, line.barcode]
+      )
+
+      if (stockUpdate.rows.length === 0) {
+        return await decline(
+          409,
+          'insufficient_stock',
+          `Not enough stock for ${line.name}`,
+          { out_of_stock_item: line.name }
+        )
+      }
     }
 
     // Approved: take the money and record the sale

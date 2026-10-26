@@ -19,15 +19,28 @@ function Kiosk() {
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
 
   const addToCart = (product) => {
+    const stock = Number(product.stock ?? 0)
+
+    if (stock <= 0) {
+      setError(`${product.name} is out of stock`)
+      return
+    }
+
     setCart(prev => {
       const existing = prev.find(i => i.barcode === product.barcode)
+
       if (existing) {
+        if (existing.quantity + 1 > stock) {
+          setError(`Only ${stock} of ${product.name} left in stock`)
+          return prev
+        }
         return prev.map(i =>
           i.barcode === product.barcode
             ? { ...i, quantity: i.quantity + 1 }
             : i
         )
       }
+
       return [...prev, { ...product, quantity: 1 }]
     })
     setError('')

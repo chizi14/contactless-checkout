@@ -25,10 +25,11 @@ function Admin() {
     barcode: "",
     name: "",
     price: "",
+    stock: "",
   });
   const [productMsg, setProductMsg] = useState("");
   const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({ name: "", price: "" });
+  const [editForm, setEditForm] = useState({ name: "", price: "", stock: "" });
 
   // Card state
   const [cardForm, setCardForm] = useState({ uid: "", owner_name: "" });
@@ -73,9 +74,10 @@ function Admin() {
         barcode: productForm.barcode,
         name: productForm.name,
         price: parseFloat(productForm.price),
+        stock: productForm.stock === "" ? 0 : parseInt(productForm.stock, 10),
       });
       setProductMsg("Product added successfully");
-      setProductForm({ barcode: "", name: "", price: "" });
+      setProductForm({ barcode: "", name: "", price: "", stock: "" });
       fetchAll();
     } catch (err) {
       setProductMsg("Failed to add product. Barcode may already exist.");
@@ -84,7 +86,7 @@ function Admin() {
 
   const startEdit = (p) => {
     setEditingId(p.id);
-    setEditForm({ name: p.name, price: String(p.price) });
+    setEditForm({ name: p.name, price: String(p.price), stock: String(p.stock ?? 0) });
   };
 
   const handleUpdateProduct = async (id) => {
@@ -96,6 +98,7 @@ function Admin() {
       await api.put(`/products/${id}`, {
         name: editForm.name,
         price: parseFloat(editForm.price),
+        stock: editForm.stock === "" ? 0 : parseInt(editForm.stock, 10),
       });
       setProductMsg("Product updated successfully");
       setEditingId(null);
@@ -363,13 +366,19 @@ function Admin() {
                   <h3 className="text-text-primary font-semibold mb-4">
                     Add New Product
                   </h3>
-                  <div className="grid grid-cols-3 gap-3 mb-3">
-                    {["barcode", "name", "price"].map((field) => (
+                  <div className="grid grid-cols-4 gap-3 mb-3">
+                    {["barcode", "name", "price", "stock"].map((field) => (
                       <input
                         key={field}
-                        type={field === "price" ? "number" : "text"}
+                        type={
+                          field === "price" || field === "stock"
+                            ? "number"
+                            : "text"
+                        }
                         placeholder={
-                          field.charAt(0).toUpperCase() + field.slice(1)
+                          field === "stock"
+                            ? "Stock (0 if unset)"
+                            : field.charAt(0).toUpperCase() + field.slice(1)
                         }
                         value={productForm[field]}
                         onChange={(e) =>
@@ -450,6 +459,18 @@ function Admin() {
                                 }
                                 className={`${smallInputClass} w-24`}
                               />
+                              <input
+                                type="number"
+                                placeholder="Stock"
+                                value={editForm.stock}
+                                onChange={(e) =>
+                                  setEditForm((prev) => ({
+                                    ...prev,
+                                    stock: e.target.value,
+                                  }))
+                                }
+                                className={`${smallInputClass} w-20`}
+                              />
                               <button
                                 onClick={() => handleUpdateProduct(p.id)}
                                 className="text-accent text-xs font-medium hover:opacity-70"
@@ -468,6 +489,19 @@ function Admin() {
                               <p className="text-text-primary font-semibold text-sm">
                                 MWK {money(p.price)}
                               </p>
+                              <span
+                                className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                  Number(p.stock) === 0
+                                    ? "bg-danger-light text-danger"
+                                    : Number(p.stock) <= 5
+                                    ? "bg-yellow-100 text-yellow-700"
+                                    : "bg-surface text-text-secondary"
+                                }`}
+                              >
+                                {Number(p.stock) === 0
+                                  ? "Out of stock"
+                                  : `${p.stock} in stock`}
+                              </span>
                               <button
                                 onClick={() => startEdit(p)}
                                 className="text-accent text-xs font-medium hover:opacity-70"

@@ -37,6 +37,13 @@ const createTables = async () => {
     ALTER TABLE cards ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
   `)
 
+  // Stock on hand for each product. Defaults to 0 so existing products
+  // don't silently get "unlimited" stock after this update — you set
+  // real numbers for them in the admin once this is live.
+  await pool.query(`
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INTEGER NOT NULL DEFAULT 0;
+  `)
+
   console.log('Database tables ready')
 }
 

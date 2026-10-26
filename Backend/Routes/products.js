@@ -41,7 +41,7 @@ router.get('/:barcode', async (req, res) => {
 
 // CREATE a product
 router.post('/', async (req, res) => {
-  const { barcode, name, price } = req.body
+  const { barcode, name, price, stock } = req.body
 
   if (!barcode || !name || !price) {
     return res.status(400).json({ error: 'Barcode, name and price are required' })
@@ -51,17 +51,24 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'Price must be a positive number' })
   }
 
+  // Stock is optional on creation; 0 means "not in stock yet" rather than an error
+  const stockValue = stock === undefined || stock === '' ? 0 : parseInt(stock, 10)
+  if (isNaN(stockValue) || stockValue < 0) {
+    return res.status(400).json({ error: 'Stock must be zero or a positive whole number' })
+  }
+
   try {
     const result = await db.query(
-      'INSERT INTO products (barcode, name, price) VALUES ($1, $2, $3) RETURNING *',
-      [barcode, name, parseFloat(price)]
+      'INSERT INTO products (barcode, name, price, stock) VALUES ($1, $2, $3, $4) RETURNING *',
+      [barcode, name, parseFloat(price), stockValue]
     )
     res.status(201).json({
       message: 'Product added successfully',
       product_id: result.rows[0].id,
       name,
       barcode,
-      price: parseFloat(price)
+      price: parseFloat(price),
+      stock: stockValue
     })
   } catch (error) {
     res.status(409).json({ error: 'Product with this barcode already exists' })
@@ -84,9 +91,9 @@ router.post('/scanner/item', async (req, res) => {
   res.json({ success: true, product: result.rows[0] })
 })
 
-// UPDATE a product (name and price; the barcode stays fixed)
+// UPDATE a product (name, price and stock; the barcode stays fixed)
 router.put('/:id', async (req, res) => {
-  const { name, price } = req.body
+  const { name, price, stock } = req.body
 
   if (!name || !price) {
     return res.status(400).json({ error: 'Name and price are required' })
@@ -96,9 +103,14 @@ router.put('/:id', async (req, res) => {
     return res.status(400).json({ error: 'Price must be a positive number' })
   }
 
+  const stockValue = stock === undefined || stock === '' ? 0 : parseInt(stock, 10)
+  if (isNaN(stockValue) || stockValue < 0) {
+    return res.status(400).json({ error: 'Stock must be zero or a positive whole number' })
+  }
+
   const result = await db.query(
-    'UPDATE products SET name = $1, price = $2 WHERE id = $3 RETURNING *',
-    [name, parseFloat(price), req.params.id]
+    'UPDATE products SET name = $1, price = $2, stock = $3 WHERE id = $4 RETURNING *',
+    [name, parseFloat(price), stockValue, req.params.id]
   )
 
   if (result.rows.length === 0) {
