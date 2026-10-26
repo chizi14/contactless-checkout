@@ -14,8 +14,16 @@ router.get('/latest-scan', (req, res) => {
   if (!lastScannedProduct) {
     return res.status(404).json({ error: 'No scan yet' })
   }
+
   const scan = lastScannedProduct
   lastScannedProduct = null
+
+  // Same idea as latest-tap: ignore a scan from before this customer's session began
+  const since = Number(req.query.since)
+  if (since && scan.timestamp < since) {
+    return res.status(404).json({ error: 'Scan belongs to a previous session' })
+  }
+
   res.json(scan)
 })
 

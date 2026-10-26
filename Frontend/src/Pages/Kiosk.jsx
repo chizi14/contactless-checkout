@@ -10,6 +10,10 @@ function Kiosk() {
   const [transactionData, setTransactionData] = useState(null)
   const [error, setError] = useState('')
   const [denyMessage, setDenyMessage] = useState('')
+  // Marks when THIS customer's checkout began. Taps/scans from
+  // before this moment are ignored, so a previous customer's
+  // leftover tap or scan can never land in a new cart.
+  const [sessionStart, setSessionStart] = useState(() => Date.now())
   const navigate = useNavigate()
 
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
@@ -47,6 +51,7 @@ function Kiosk() {
     setTransactionData(null)
     setDenyMessage('')
     setError('')
+    setSessionStart(Date.now())
   }
 
   // After a decline: keep the cart and let the customer try again
@@ -106,7 +111,7 @@ function Kiosk() {
     const interval = setInterval(async () => {
       if (paymentState !== 'idle') return
       try {
-        const res = await api.get('/products/latest-scan')
+        const res = await api.get(`/products/latest-scan?since=${sessionStart}`)
         if (res.data && res.data.barcode) {
           addToCart(res.data)
         }
@@ -115,7 +120,7 @@ function Kiosk() {
       }
     }, 1500)
     return () => clearInterval(interval)
-  }, [paymentState])
+  }, [paymentState, sessionStart])
 
   // Poll for card taps from ESP32
   useEffect(() => {
@@ -123,7 +128,7 @@ function Kiosk() {
       if (paymentState !== 'idle') return
       if (cart.length === 0) return
       try {
-        const res = await api.get('/cards/latest-tap')
+        const res = await api.get(`/cards/latest-tap?since=${sessionStart}`)
         if (res.data && res.data.timestamp) {
           handlePayment(res.data)
         }
@@ -132,7 +137,7 @@ function Kiosk() {
       }
     }, 1000)
     return () => clearInterval(interval)
-  }, [paymentState, cart])
+  }, [paymentState, cart, sessionStart])
 
   return (
     <div className="min-h-screen bg-primary">

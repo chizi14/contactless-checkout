@@ -90,12 +90,20 @@ router.get('/latest-tap', (req, res) => {
   if (!lastVerifiedCard) {
     return res.status(404).json({ error: 'No tap yet' })
   }
+
   const tap = lastVerifiedCard
   lastVerifiedCard = null
 
   // Ignore taps older than 15 seconds so an old tap can never pay for a new cart
   if (Date.now() - tap.timestamp > 15000) {
     return res.status(404).json({ error: 'Tap expired' })
+  }
+
+  // "since" is the moment THIS customer's checkout started (sent by the kiosk).
+  // A tap from before that moment belongs to a previous customer, not this one.
+  const since = Number(req.query.since)
+  if (since && tap.timestamp < since) {
+    return res.status(404).json({ error: 'Tap belongs to a previous session' })
   }
 
   res.json(tap)
