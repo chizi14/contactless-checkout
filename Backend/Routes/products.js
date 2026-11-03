@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const db = require('../Database')
+const { log } = require('../Logger')
 
 let lastScannedProduct = null
 
@@ -62,6 +63,7 @@ router.post('/', async (req, res) => {
       'INSERT INTO products (barcode, name, price, stock) VALUES ($1, $2, $3, $4) RETURNING *',
       [barcode, name, parseFloat(price), stockValue]
     )
+    log('product_create', `Added product: ${name} (${barcode})`, { product_id: result.rows[0].id })
     res.status(201).json({
       message: 'Product added successfully',
       product_id: result.rows[0].id,
@@ -84,9 +86,11 @@ router.post('/scanner/item', async (req, res) => {
     [barcode]
   )
   if (result.rows.length === 0) {
+    log('scan_denied', `Scanned unknown barcode: ${barcode}`, { barcode })
     return res.status(404).json({ error: 'Product not found' })
   }
 
+  log('scan_success', `Scanned: ${result.rows[0].name}`, { barcode })
   lastScannedProduct = { ...result.rows[0], timestamp: Date.now() }
   res.json({ success: true, product: result.rows[0] })
 })
@@ -117,6 +121,7 @@ router.put('/:id', async (req, res) => {
     return res.status(404).json({ error: 'Product not found' })
   }
 
+  log('product_update', `Updated product #${req.params.id}: ${name}`, { product_id: req.params.id })
   res.json({ message: 'Product updated successfully', product: result.rows[0] })
 })
 
@@ -129,6 +134,7 @@ router.delete('/:id', async (req, res) => {
   if (result.rows.length === 0) {
     return res.status(404).json({ error: 'Product not found' })
   }
+  log('product_delete', `Deleted product #${req.params.id}`, { product_id: req.params.id })
   res.json({ message: 'Product deleted successfully' })
 })
 

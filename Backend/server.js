@@ -9,11 +9,13 @@ app.use(express.json())
 const cardRoutes = require('./Routes/cards')
 const productRoutes = require('./Routes/products')
 const transactionRoutes = require('./Routes/transactions')
+const logRoutes = require('./Routes/logs')
 
 app.use('/api/cards', cardRoutes)
 app.use('/api/products', productRoutes)
 app.use('/api/transactions', transactionRoutes)
 app.use('/api/scanner', productRoutes)
+app.use('/api/logs', logRoutes)
 
 app.get('/', (req, res) => {
   res.json({ message: 'Checkout API is running' })

@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const bcrypt = require('bcryptjs')
 const db = require('../Database')
+const { log } = require('../Logger')
 
 let lastVerifiedCard = null
 
@@ -20,6 +21,7 @@ router.post('/register', async (req, res) => {
       'INSERT INTO cards (uid_hash, owner_name) VALUES ($1, $2) RETURNING *',
       [uid_hash, owner_name]
     )
+    log('card_register', `Registered card for ${owner_name}`, { card_id: result.rows[0].id })
     res.status(201).json({
       message: 'Card registered successfully',
       card_id: result.rows[0].id,
@@ -45,6 +47,7 @@ router.post('/verify', async (req, res) => {
     const matchedCard = cards.find(card => bcrypt.compareSync(uid, card.uid_hash))
 
     if (!matchedCard) {
+      log('tap_denied', 'Unrecognised card tapped')
       lastVerifiedCard = {
         verified: false,
         message: 'Card not recognised',
@@ -57,6 +60,7 @@ router.post('/verify', async (req, res) => {
     }
 
     if (matchedCard.status === 'blocked') {
+      log('tap_denied', `Blocked card tapped: ${matchedCard.owner_name}`, { card_id: matchedCard.id })
       lastVerifiedCard = {
         verified: false,
         message: 'This card is blocked',
@@ -68,6 +72,7 @@ router.post('/verify', async (req, res) => {
       })
     }
 
+    log('tap_success', `Card tapped: ${matchedCard.owner_name}`, { card_id: matchedCard.id })
     lastVerifiedCard = {
       verified: true,
       card_id: matchedCard.id,
@@ -146,6 +151,7 @@ router.put('/:id', async (req, res) => {
     return res.status(404).json({ error: 'Card not found' })
   }
 
+  log('card_update', `Renamed card #${req.params.id} to ${owner_name.trim()}`, { card_id: req.params.id })
   res.json({ message: 'Card updated successfully', card: result.rows[0] })
 })
 
@@ -166,6 +172,7 @@ router.patch('/:id/status', async (req, res) => {
     return res.status(404).json({ error: 'Card not found' })
   }
 
+  log('card_status', `Card #${req.params.id} (${result.rows[0].owner_name}) set to ${status}`, { card_id: req.params.id, status })
   res.json({ message: `Card ${status} successfully`, card: result.rows[0] })
 })
 
@@ -186,6 +193,7 @@ router.post('/:id/topup', async (req, res) => {
     return res.status(404).json({ error: 'Card not found' })
   }
 
+  log('card_topup', `Topped up ${result.rows[0].owner_name} by MWK ${amount}`, { card_id: req.params.id, amount })
   res.json({ message: 'Top-up successful', card: result.rows[0] })
 })
 
@@ -211,6 +219,7 @@ router.delete('/:id', async (req, res) => {
     return res.status(404).json({ error: 'Card not found' })
   }
 
+  log('card_delete', `Deleted card #${req.params.id}`, { card_id: req.params.id })
   res.json({ message: 'Card deleted successfully' })
 })
 

@@ -1,6 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const db = require('../Database')
+const { log } = require('../Logger')
 
 // Transactions are financial records: they can be created and read,
 // but never edited or deleted. Mistakes are fixed with a void/refund.
@@ -81,11 +82,12 @@ router.post('/', async (req, res) => {
     // Declined: save a record of the attempt, then tell the kiosk why
     const decline = async (httpStatus, reason, message, extra = {}) => {
       await client.query(
-        `INSERT INTO transactions (card_id, total_amount, items_json, status)
-         VALUES ($1, $2, $3, 'declined')`,
-        [card_id, total, JSON.stringify(lines)]
+        `INSERT INTO transactions (card_id, total_amount, items_json, status, decline_reason)
+         VALUES ($1, $2, $3, 'declined', $4)`,
+        [card_id, total, JSON.stringify(lines), reason]
       )
       await client.query('COMMIT')
+      log('payment_declined', `Sale declined (${reason}) — card #${card_id}, MWK ${total}`, { card_id, reason, total })
       return res.status(httpStatus).json({
         approved: false,
         reason,
@@ -139,6 +141,12 @@ router.post('/', async (req, res) => {
 
     await client.query('COMMIT')
 
+    log('payment_approved', `Sale approved for ${card.owner_name}: MWK ${total}`, {
+      card_id,
+      transaction_id: inserted.rows[0].id,
+      total
+    })
+
     res.status(201).json({
       approved: true,
       message: 'Transaction approved',
@@ -153,6 +161,7 @@ router.post('/', async (req, res) => {
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {})
     console.error('Payment error:', error.message)
+    log('server_error', `Payment error: ${error.message}`, { card_id })
     res.status(500).json({
       approved: false,
       reason: 'server_error',
@@ -171,6 +180,7 @@ router.get('/', async (req, res) => {
       transactions.total_amount,
       transactions.items_json,
       transactions.status,
+      transactions.decline_reason,
       transactions.created_at,
       cards.owner_name
     FROM transactions
@@ -194,6 +204,7 @@ router.get('/:id', async (req, res) => {
       transactions.total_amount,
       transactions.items_json,
       transactions.status,
+      transactions.decline_reason,
       transactions.created_at,
       cards.owner_name
     FROM transactions

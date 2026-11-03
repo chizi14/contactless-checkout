@@ -44,6 +44,24 @@ const createTables = async () => {
     ALTER TABLE products ADD COLUMN IF NOT EXISTS stock INTEGER NOT NULL DEFAULT 0;
   `)
 
+  // Records why a sale was declined (card_blocked, insufficient_funds,
+  // insufficient_stock, ...). NULL for approved sales.
+  await pool.query(`
+    ALTER TABLE transactions ADD COLUMN IF NOT EXISTS decline_reason TEXT;
+  `)
+
+  // A simple activity log: one row per important event, so you can show
+  // and explain exactly what happened during a demo or defense.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS logs (
+      id SERIAL PRIMARY KEY,
+      type TEXT NOT NULL,
+      message TEXT NOT NULL,
+      meta_json TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `)
+
   console.log('Database tables ready')
 }
 

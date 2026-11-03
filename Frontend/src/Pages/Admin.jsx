@@ -7,7 +7,11 @@ import {
   XAxis,
   YAxis,
   Tooltip,
+  Legend,
   ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
 } from "recharts";
 
 // Safe money formatter: never crashes if a value is missing
@@ -18,6 +22,7 @@ function Admin() {
   const [transactions, setTransactions] = useState([]);
   const [products, setProducts] = useState([]);
   const [cards, setCards] = useState([]);
+  const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Product state
@@ -49,14 +54,16 @@ function Admin() {
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const [t, p, c] = await Promise.all([
+      const [t, p, c, l] = await Promise.all([
         api.get("/transactions"),
         api.get("/products"),
         api.get("/cards"),
+        api.get("/logs?limit=150"),
       ]);
       setTransactions(t.data);
       setProducts(p.data);
       setCards(c.data);
+      setLogs(l.data);
     } catch (err) {
       console.error("Fetch error:", err);
     }
@@ -209,7 +216,66 @@ function Admin() {
     amount: Number(t.total_amount || 0),
   }));
 
-  const tabs = ["transactions", "products", "cards"];
+  const approvedCount = transactions.filter((t) => t.status === "approved").length;
+  const declinedCount = transactions.filter((t) => t.status === "declined").length;
+  const statusPieData = [
+    { name: "Approved", value: approvedCount },
+    { name: "Declined", value: declinedCount },
+  ].filter((d) => d.value > 0);
+
+  const reasonLabels = {
+    card_blocked: "Card blocked",
+    insufficient_funds: "Insufficient funds",
+    insufficient_stock: "Out of stock",
+    card_not_found: "Unknown card",
+    product_not_found: "Unknown product",
+    bad_request: "Bad request",
+    server_error: "Server error",
+  };
+  const reasonCounts = {};
+  transactions
+    .filter((t) => t.status === "declined" && t.decline_reason)
+    .forEach((t) => {
+      const label = reasonLabels[t.decline_reason] || t.decline_reason;
+      reasonCounts[label] = (reasonCounts[label] || 0) + 1;
+    });
+  const reasonPieData = Object.entries(reasonCounts).map(([name, value]) => ({
+    name,
+    value,
+  }));
+
+  const PIE_COLORS = ["#2d6a4f", "#e07a5f", "#f2cc8f", "#3d405b", "#81b29a"];
+
+  const stockBarData = products.map((p) => ({
+    name: p.name.length > 10 ? p.name.slice(0, 10) + "…" : p.name,
+    stock: Number(p.stock || 0),
+  }));
+
+  const stockColor = (stock) => {
+    if (stock === 0) return "#c84c3c";
+    if (stock <= 5) return "#e0a62b";
+    return "#2d6a4f";
+  };
+
+  const logTypeStyle = {
+    tap_success: { emoji: "💳", color: "bg-success-light text-accent" },
+    tap_denied: { emoji: "🚫", color: "bg-danger-light text-danger" },
+    scan_success: { emoji: "📦", color: "bg-success-light text-accent" },
+    scan_denied: { emoji: "❓", color: "bg-yellow-100 text-yellow-700" },
+    payment_approved: { emoji: "✅", color: "bg-success-light text-accent" },
+    payment_declined: { emoji: "❌", color: "bg-danger-light text-danger" },
+    product_create: { emoji: "🆕", color: "bg-surface text-text-secondary" },
+    product_update: { emoji: "✏️", color: "bg-surface text-text-secondary" },
+    product_delete: { emoji: "🗑️", color: "bg-surface text-text-secondary" },
+    card_register: { emoji: "🪪", color: "bg-surface text-text-secondary" },
+    card_update: { emoji: "✏️", color: "bg-surface text-text-secondary" },
+    card_status: { emoji: "🔒", color: "bg-surface text-text-secondary" },
+    card_topup: { emoji: "💰", color: "bg-success-light text-accent" },
+    card_delete: { emoji: "🗑️", color: "bg-surface text-text-secondary" },
+    server_error: { emoji: "⚠️", color: "bg-danger-light text-danger" },
+  };
+
+  const tabs = ["transactions", "products", "cards", "logs"];
 
   const inputClass =
     "bg-surface text-gray-900 placeholder-gray-400 px-4 py-2.5 rounded-lg border border-border text-sm focus:outline-none focus:ring-2 focus:ring-accent-light cursor-text";
@@ -311,6 +377,70 @@ function Admin() {
                   </div>
                 )}
 
+                {transactions.length > 0 && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-secondary rounded-xl p-5 border border-border">
+                      <h3 className="text-text-primary font-semibold mb-4">
+                        Approved vs Declined
+                      </h3>
+                      <ResponsiveContainer width="100%" height={220}>
+                        <PieChart>
+                          <Pie
+                            data={statusPieData}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={75}
+                            label={({ name, value }) => `${name}: ${value}`}
+                          >
+                            {statusPieData.map((entry, i) => (
+                              <Cell
+                                key={entry.name}
+                                fill={entry.name === "Approved" ? "#2d6a4f" : "#c84c3c"}
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    <div className="bg-secondary rounded-xl p-5 border border-border">
+                      <h3 className="text-text-primary font-semibold mb-4">
+                        Why Sales Were Declined
+                      </h3>
+                      {reasonPieData.length === 0 ? (
+                        <div className="h-[220px] flex items-center justify-center text-text-muted text-sm">
+                          No declines yet
+                        </div>
+                      ) : (
+                        <ResponsiveContainer width="100%" height={220}>
+                          <PieChart>
+                            <Pie
+                              data={reasonPieData}
+                              dataKey="value"
+                              nameKey="name"
+                              cx="50%"
+                              cy="50%"
+                              outerRadius={75}
+                              label={({ name, value }) => `${name}: ${value}`}
+                            >
+                              {reasonPieData.map((entry, i) => (
+                                <Cell
+                                  key={entry.name}
+                                  fill={PIE_COLORS[i % PIE_COLORS.length]}
+                                />
+                              ))}
+                            </Pie>
+                            <Tooltip />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="bg-secondary rounded-xl border border-border overflow-hidden">
                   <div className="px-5 py-4 border-b border-border">
                     <h3 className="text-text-primary font-semibold">
@@ -409,6 +539,36 @@ function Admin() {
                     Add Product
                   </button>
                 </div>
+
+                {products.length > 0 && (
+                  <div className="bg-secondary rounded-xl p-5 border border-border">
+                    <h3 className="text-text-primary font-semibold mb-1">
+                      Stock Levels
+                    </h3>
+                    <p className="text-text-muted text-xs mb-4">
+                      Green: healthy · Yellow: 5 or fewer · Red: out of stock
+                    </p>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart data={stockBarData}>
+                        <XAxis
+                          dataKey="name"
+                          tick={{ fontSize: 11 }}
+                          interval={0}
+                          angle={-20}
+                          textAnchor="end"
+                          height={50}
+                        />
+                        <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                        <Tooltip />
+                        <Bar dataKey="stock" radius={[4, 4, 0, 0]}>
+                          {stockBarData.map((entry, i) => (
+                            <Cell key={i} fill={stockColor(entry.stock)} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
 
                 <div className="bg-secondary rounded-xl border border-border overflow-hidden">
                   <div className="px-5 py-4 border-b border-border">
@@ -685,6 +845,54 @@ function Admin() {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* Logs tab */}
+            {activeTab === "logs" && (
+              <div className="bg-secondary rounded-xl border border-border overflow-hidden">
+                <div className="px-5 py-4 border-b border-border">
+                  <h3 className="text-text-primary font-semibold">
+                    Activity Log
+                  </h3>
+                  <p className="text-text-muted text-xs mt-0.5">
+                    Every card tap, scan, payment and admin action, newest first
+                  </p>
+                </div>
+                {logs.length === 0 ? (
+                  <div className="px-5 py-10 text-center text-text-muted text-sm">
+                    No activity yet
+                  </div>
+                ) : (
+                  <div className="divide-y divide-border max-h-[600px] overflow-y-auto">
+                    {logs.map((entry) => {
+                      const style = logTypeStyle[entry.type] || {
+                        emoji: "•",
+                        color: "bg-surface text-text-secondary",
+                      };
+                      return (
+                        <div
+                          key={entry.id}
+                          className="px-5 py-3 flex items-start gap-3"
+                        >
+                          <span
+                            className={`text-xs px-2 py-1 rounded-full font-medium shrink-0 ${style.color}`}
+                          >
+                            {style.emoji} {entry.type.replace(/_/g, " ")}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-text-primary text-sm">
+                              {entry.message}
+                            </p>
+                          </div>
+                          <span className="text-text-muted text-xs shrink-0">
+                            {new Date(entry.created_at).toLocaleString()}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </>
