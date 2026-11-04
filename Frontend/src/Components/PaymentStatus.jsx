@@ -1,4 +1,53 @@
-function PaymentStatus({ state, data, message, onReset, onRetry }) {
+import { QRCodeSVG } from 'qrcode.react'
+
+function PaymentStatus({ state, data, message, onReset, onRetry, momo, onCancelMomo }) {
+  const isMomo = data?.payment_method === 'mobile_money'
+
+  if (state === 'momo_starting') {
+    return (
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-65px)]">
+        <div className="w-20 h-20 border-4 border-accent-lighter border-t-accent rounded-full animate-spin mb-6"></div>
+        <p className="text-text-primary font-semibold text-xl">Creating Payment</p>
+        <p className="text-text-muted text-sm mt-2">Please wait...</p>
+      </div>
+    )
+  }
+
+  if (state === 'momo_waiting') {
+    return (
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-65px)] px-4">
+        <div className="bg-secondary rounded-2xl shadow-elevated border border-border w-full max-w-md p-8 text-center">
+          <h2 className="text-text-primary text-2xl font-bold mb-1">Pay with Mobile Money</h2>
+          <p className="text-text-muted text-sm mb-5">
+            Scan this code with your phone camera, then pay with Airtel Money or TNM Mpamba
+          </p>
+
+          <div className="bg-white p-4 rounded-xl border border-border inline-block mb-4">
+            {momo?.checkout_url && (
+              <QRCodeSVG value={momo.checkout_url} size={220} level="M" />
+            )}
+          </div>
+
+          <p className="text-text-primary font-bold text-2xl mb-1">
+            MWK {Number(momo?.total || 0).toLocaleString()}
+          </p>
+
+          <div className="flex items-center justify-center gap-2 mb-6">
+            <div className="w-4 h-4 border-2 border-accent-lighter border-t-accent rounded-full animate-spin"></div>
+            <p className="text-text-muted text-sm">Waiting for payment...</p>
+          </div>
+
+          <button
+            onClick={onCancelMomo}
+            className="w-full border border-border text-text-secondary font-medium py-3 rounded-xl hover:opacity-80 transition-opacity"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   if (state === 'processing') {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-65px)]">
@@ -24,7 +73,7 @@ function PaymentStatus({ state, data, message, onReset, onRetry }) {
             Payment Approved
           </h2>
           <p className="text-text-muted text-sm mb-6">
-            Thank you, {data?.owner}
+            {isMomo ? 'Paid with Mobile Money. Thank you!' : `Thank you, ${data?.owner}`}
           </p>
 
           <div className="bg-surface rounded-xl p-4 mb-6 text-left space-y-2">
@@ -44,12 +93,14 @@ function PaymentStatus({ state, data, message, onReset, onRetry }) {
                 MWK {data?.total_amount?.toLocaleString()}
               </span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-text-muted text-sm">Remaining balance</span>
-              <span className="text-text-secondary text-sm font-medium">
-                MWK {Number(data?.balance_after || 0).toLocaleString()}
-              </span>
-            </div>
+            {!isMomo && (
+              <div className="flex justify-between">
+                <span className="text-text-muted text-sm">Remaining balance</span>
+                <span className="text-text-secondary text-sm font-medium">
+                  MWK {Number(data?.balance_after || 0).toLocaleString()}
+                </span>
+              </div>
+            )}
           </div>
 
           <p className="text-text-muted text-xs mb-6">
@@ -72,7 +123,7 @@ function PaymentStatus({ state, data, message, onReset, onRetry }) {
             <p>Receipt No: RCP-{String(data?.transaction_id).padStart(6, '0')}</p>
             <p>Date: {new Date(data?.created_at).toLocaleString('en-GB')}</p>
             <p>Customer: {data?.owner}</p>
-            <p>Payment: RFID Card</p>
+            <p>Payment: {isMomo ? 'Mobile Money (Paychangu)' : 'RFID Card'}</p>
             <hr />
             {data?.items?.map((item, index) => (
               <div key={index} style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -85,10 +136,12 @@ function PaymentStatus({ state, data, message, onReset, onRetry }) {
               <span>TOTAL</span>
               <span>MWK {data?.total_amount?.toLocaleString()}</span>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span>Balance left</span>
-              <span>MWK {Number(data?.balance_after || 0).toLocaleString()}</span>
-            </div>
+            {!isMomo && (
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Balance left</span>
+                <span>MWK {Number(data?.balance_after || 0).toLocaleString()}</span>
+              </div>
+            )}
             <hr />
             <p style={{ textAlign: 'center' }}>Thank you for shopping with us!</p>
           </div>

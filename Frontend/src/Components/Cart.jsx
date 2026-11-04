@@ -1,4 +1,4 @@
-function Cart({ cart, total, onRemove, onClear, onIncrement, onDecrement }) {
+function Cart({ cart, total, onRemove, onClear, onIncrement, onDecrement, onMobileMoney }) {
   return (
     <div className="flex flex-col h-full">
 
@@ -107,6 +107,22 @@ function Cart({ cart, total, onRemove, onClear, onIncrement, onDecrement }) {
           </svg>
           Tap Card to Pay
         </div>
+
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-px bg-border"></div>
+          <span className="text-text-muted text-xs">or</span>
+          <div className="flex-1 h-px bg-border"></div>
+        </div>
+
+        <button
+          onClick={onMobileMoney}
+          disabled={cart.length === 0}
+          className="w-full border-2 border-accent text-accent font-semibold py-3
+                     rounded-xl hover:bg-accent-lighter transition-colors
+                     disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Pay with Mobile Money
+        </button>
 
         {cart.length > 0 && (
           <button

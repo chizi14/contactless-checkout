@@ -74,6 +74,32 @@ const createTables = async () => {
     );
   `)
 
+  // Transactions can now also be paid with mobile money (no card involved),
+  // so card_id may be empty and we record how the sale was paid.
+  await pool.query(`
+    ALTER TABLE transactions ALTER COLUMN card_id DROP NOT NULL;
+    ALTER TABLE transactions ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'card';
+    ALTER TABLE transactions ADD COLUMN IF NOT EXISTS payment_ref TEXT;
+  `)
+
+  // Basket payments made with mobile money through Paychangu. A row starts
+  // as 'pending'; the sale is only completed (stock taken, transaction
+  // saved) after OUR server verifies the payment with Paychangu.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS mobile_sales (
+      id SERIAL PRIMARY KEY,
+      tx_ref TEXT NOT NULL UNIQUE,
+      total NUMERIC(12,2) NOT NULL,
+      items_json TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      transaction_id INTEGER REFERENCES transactions(id),
+      paychangu_reference TEXT,
+      failure_reason TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      completed_at TIMESTAMP
+    );
+  `)
+
   // A simple activity log: one row per important event, so you can show
   // and explain exactly what happened during a demo or defense.
   await pool.query(`

@@ -233,9 +233,10 @@ router.get('/', async (req, res) => {
       transactions.status,
       transactions.decline_reason,
       transactions.created_at,
-      cards.owner_name
+      transactions.payment_method,
+      COALESCE(cards.owner_name, 'Mobile Money customer') AS owner_name
     FROM transactions
-    JOIN cards ON transactions.card_id = cards.id
+    LEFT JOIN cards ON transactions.card_id = cards.id
     ORDER BY transactions.created_at DESC
   `)
 
@@ -257,9 +258,10 @@ router.get('/:id', async (req, res) => {
       transactions.status,
       transactions.decline_reason,
       transactions.created_at,
-      cards.owner_name
+      transactions.payment_method,
+      COALESCE(cards.owner_name, 'Mobile Money customer') AS owner_name
     FROM transactions
-    JOIN cards ON transactions.card_id = cards.id
+    LEFT JOIN cards ON transactions.card_id = cards.id
     WHERE transactions.id = $1
   `, [req.params.id])
 

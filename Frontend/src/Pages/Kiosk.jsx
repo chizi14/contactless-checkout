@@ -10,6 +10,8 @@ function Kiosk() {
   const [transactionData, setTransactionData] = useState(null)
   const [error, setError] = useState('')
   const [denyMessage, setDenyMessage] = useState('')
+  // The pending mobile money payment: { tx_ref, checkout_url, total }
+  const [momo, setMomo] = useState(null)
   // Marks when THIS customer's checkout began. Taps/scans from
   // before this moment are ignored, so a previous customer's
   // leftover tap or scan can never land in a new cart.
@@ -64,6 +66,7 @@ function Kiosk() {
     setTransactionData(null)
     setDenyMessage('')
     setError('')
+    setMomo(null)
     setSessionStart(Date.now())
   }
 
@@ -71,6 +74,45 @@ function Kiosk() {
   const retryPayment = () => {
     setPaymentState('idle')
     setDenyMessage('')
+  }
+
+  // Pay the whole basket with mobile money (Airtel Money / TNM Mpamba)
+  const startMobileMoney = async () => {
+    if (cart.length === 0) {
+      setError('Cart is empty')
+      return
+    }
+    setPaymentState('momo_starting')
+    try {
+      // Send only barcodes and quantities. The SERVER works out the total.
+      const items = cart.map(i => ({ barcode: i.barcode, quantity: i.quantity }))
+      const res = await api.post('/mobile-sales/start', { items })
+      setMomo(res.data)
+      setPaymentState('momo_waiting')
+    } catch (err) {
+      setDenyMessage(
+        err.response?.data?.message || 'Could not start the mobile money payment. Please try again.'
+      )
+      setPaymentState('denied')
+    }
+  }
+
+  // The customer gave up waiting. The server double-checks first, so a
+  // payment that just went through is never lost.
+  const cancelMobileMoney = async () => {
+    const ref = momo?.tx_ref
+    setMomo(null)
+    try {
+      const res = await api.post(`/mobile-sales/cancel/${encodeURIComponent(ref)}`)
+      if (res.data?.status === 'completed') {
+        setTransactionData({ owner: 'Mobile Money customer', ...res.data.sale })
+        setPaymentState('approved')
+        return
+      }
+    } catch (err) {
+      // If this fails the sale simply stays pending on the server
+    }
+    setPaymentState('idle')
   }
 
   const handlePayment = async (cardData) => {
@@ -118,6 +160,34 @@ function Kiosk() {
       setPaymentState('denied')
     }
   }
+
+  // While a mobile money payment is waiting, ask the server every 3 seconds
+  // whether it has been paid
+  useEffect(() => {
+    if (paymentState !== 'momo_waiting' || !momo) return
+    let stopped = false
+    const interval = setInterval(async () => {
+      try {
+        const res = await api.get(`/mobile-sales/verify/${encodeURIComponent(momo.tx_ref)}`)
+        if (stopped) return
+        if (res.data.status === 'completed') {
+          setTransactionData({ owner: 'Mobile Money customer', ...res.data.sale })
+          setPaymentState('approved')
+          setMomo(null)
+        } else if (res.data.status === 'failed') {
+          setDenyMessage(res.data.message || 'The payment was not completed.')
+          setPaymentState('denied')
+          setMomo(null)
+        }
+      } catch (err) {
+        // Not ready yet, keep waiting
+      }
+    }, 3000)
+    return () => {
+      stopped = true
+      clearInterval(interval)
+    }
+  }, [paymentState, momo])
 
   // Poll for scanned items from tablet
   useEffect(() => {
@@ -192,6 +262,8 @@ function Kiosk() {
           message={denyMessage}
           onReset={clearCart}
           onRetry={retryPayment}
+          momo={momo}
+          onCancelMomo={cancelMobileMoney}
         />
       ) : (
         <div className="flex h-[calc(100vh-65px)]">
@@ -258,6 +330,7 @@ function Kiosk() {
               onClear={clearCart}
               onIncrement={(b) => updateQuantity(b, 1)}
               onDecrement={(b) => updateQuantity(b, -1)}
+              onMobileMoney={startMobileMoney}
             />
           </div>
 
