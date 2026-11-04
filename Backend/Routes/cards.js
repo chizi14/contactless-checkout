@@ -2,7 +2,16 @@ const express = require('express')
 const router = express.Router()
 const bcrypt = require('bcryptjs')
 const db = require('../Database')
+const crypto = require('crypto')
 const { log } = require('../Logger')
+
+// Fast, one-way fingerprint of a card UID. The secret lives ONLY in the
+// UID_SECRET environment variable on Render, never in the code.
+const hashUid = (uid) => {
+  const secret = process.env.UID_SECRET
+  if (!secret) throw new Error('UID_SECRET is not set')
+  return crypto.createHmac('sha256', secret).update(String(uid).trim().toUpperCase()).digest('hex')
+}
 
 let lastVerifiedCard = null
 
@@ -14,9 +23,8 @@ router.post('/register', async (req, res) => {
     return res.status(400).json({ error: 'UID and owner name are required' })
   }
 
-  const uid_hash = bcrypt.hashSync(uid, 10)
-
   try {
+    const uid_hash = hashUid(uid)
     const result = await db.query(
       'INSERT INTO cards (uid_hash, owner_name) VALUES ($1, $2) RETURNING *',
       [uid_hash, owner_name]
@@ -41,10 +49,21 @@ router.post('/verify', async (req, res) => {
   }
 
   try {
-    const result = await db.query('SELECT * FROM cards')
-    const cards = result.rows
+    const hmac = hashUid(uid)
 
-    const matchedCard = cards.find(card => bcrypt.compareSync(uid, card.uid_hash))
+    // Fast path: one indexed lookup (uid_hash is UNIQUE)
+    const found = await db.query('SELECT * FROM cards WHERE uid_hash = $1', [hmac])
+    let matchedCard = found.rows[0]
+
+    // Old cards still have a slow bcrypt hash. Check only those, and
+    // upgrade a match to the fast hash so it is slow at most once.
+    if (!matchedCard) {
+      const legacy = await db.query("SELECT * FROM cards WHERE uid_hash LIKE '$2%'")
+      matchedCard = legacy.rows.find(card => bcrypt.compareSync(uid, card.uid_hash))
+      if (matchedCard) {
+        await db.query('UPDATE cards SET uid_hash = $1 WHERE id = $2', [hmac, matchedCard.id])
+      }
+    }
 
     if (!matchedCard) {
       log('tap_denied', 'Unrecognised card tapped')
