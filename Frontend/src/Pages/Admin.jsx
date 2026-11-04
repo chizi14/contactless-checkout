@@ -143,7 +143,7 @@ const logCategory = (type) => {
   if (type.startsWith("tap_")) return "taps";
   if (type.startsWith("scan_")) return "scans";
   if (type.startsWith("payment_")) return "payments";
-  if (type.startsWith("card_") || type === "balance_adjust") return "cards";
+  if (type.startsWith("card_") || type.startsWith("topup_") || type === "balance_adjust") return "cards";
   if (type.startsWith("product_") || type === "stock_alert") return "products";
   if (type === "server_error") return "errors";
   return "other";
@@ -171,7 +171,7 @@ const parseMeta = (raw) => {
 const MONEY_KEYS = [
   "balance", "balance_before", "balance_after", "total", "amount", "price",
   "old_balance", "new_balance", "difference", "shortfall", "card_balance",
-  "balance_at_deletion",
+  "balance_at_deletion", "amount_paid", "charges", "expected_amount", "paid_amount",
 ];
 
 function MetaValue({ k, v }) {
@@ -371,6 +371,21 @@ function Admin() {
     }
   };
 
+  const handleMobileMoneyTopUp = async (cardId) => {
+    const amount = Number(topupAmounts[cardId]);
+    if (!Number.isInteger(amount) || amount < 100) {
+      setCardMsg("Enter a whole-number amount of MWK 100 or more");
+      return;
+    }
+    try {
+      const res = await api.post("/topups/start", { card_id: cardId, amount });
+      // Send the customer to Paychangu's secure payment page
+      window.location.href = res.data.checkout_url;
+    } catch (err) {
+      setCardMsg(err.response?.data?.error || "Could not start the mobile money payment");
+    }
+  };
+
   const startBalanceEdit = (c) => {
     setBalanceEditId(c.id);
     setBalanceEditValue(String(Number(c.balance || 0)));
@@ -517,6 +532,9 @@ function Admin() {
     card_update: { color: "bg-surface text-text-secondary" },
     card_status: { color: "bg-surface text-text-secondary" },
     card_topup: { color: "bg-success-light text-accent" },
+    topup_started: { color: "bg-surface text-text-secondary" },
+    topup_completed: { color: "bg-success-light text-accent" },
+    topup_failed: { color: "bg-danger-light text-danger" },
     balance_adjust: { color: "bg-surface text-text-secondary" },
     card_delete: { color: "bg-surface text-text-secondary" },
     server_error: { color: "bg-danger-light text-danger" },
@@ -1123,7 +1141,13 @@ function Admin() {
                               onClick={() => handleTopUp(c.id)}
                               className="bg-accent text-white text-xs font-medium px-3 py-2 rounded-lg hover:bg-accent-light transition-colors"
                             >
-                              Top Up
+                              Cash Top Up
+                            </button>
+                            <button
+                              onClick={() => handleMobileMoneyTopUp(c.id)}
+                              className="bg-surface text-accent text-xs font-medium px-3 py-2 rounded-lg border border-border hover:opacity-70 transition-colors"
+                            >
+                              Mobile Money
                             </button>
                             <button
                               onClick={() => startCardEdit(c)}

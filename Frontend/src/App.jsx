@@ -4,6 +4,7 @@ import Kiosk from "./Pages/Kiosk";
 import Admin from "./Pages/Admin";
 import Login from "./Pages/Login";
 import Scanner from "./Pages/Scanner";
+import TopupResult from "./Pages/TopupResult";
 
 // Shows the real error on screen instead of a blank page
 class ErrorBoundary extends Component {
@@ -42,6 +43,7 @@ function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/admin" element={<Admin />} />
           <Route path="/scanner" element={<Scanner />} />
+          <Route path="/topup-result" element={<TopupResult />} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </BrowserRouter>

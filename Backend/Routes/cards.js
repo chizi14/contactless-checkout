@@ -323,13 +323,14 @@ router.patch('/:id/balance', async (req, res) => {
 // DELETE a card (only if it has no transaction history)
 router.delete('/:id', async (req, res) => {
   const history = await db.query(
-    'SELECT COUNT(*) AS count FROM transactions WHERE card_id = $1',
+    `SELECT (SELECT COUNT(*) FROM transactions WHERE card_id = $1)
+          + (SELECT COUNT(*) FROM topups WHERE card_id = $1) AS count`,
     [req.params.id]
   )
 
   if (Number(history.rows[0].count) > 0) {
     return res.status(409).json({
-      error: 'This card has transaction history. Block it instead of deleting it.'
+      error: 'This card has transaction or top-up history. Block it instead of deleting it.'
     })
   }
 

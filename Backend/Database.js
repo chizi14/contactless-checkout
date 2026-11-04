@@ -56,6 +56,24 @@ const createTables = async () => {
     ALTER TABLE transactions ADD COLUMN IF NOT EXISTS decline_reason TEXT;
   `)
 
+  // Mobile money top-ups made through Paychangu. Each row starts as
+  // 'pending' and is only marked 'completed' (and the card credited)
+  // after OUR server has verified the payment with Paychangu.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS topups (
+      id SERIAL PRIMARY KEY,
+      tx_ref TEXT NOT NULL UNIQUE,
+      card_id INTEGER NOT NULL REFERENCES cards(id),
+      amount NUMERIC(12,2) NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'MWK',
+      status TEXT NOT NULL DEFAULT 'pending',
+      paychangu_reference TEXT,
+      failure_reason TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      completed_at TIMESTAMP
+    );
+  `)
+
   // A simple activity log: one row per important event, so you can show
   // and explain exactly what happened during a demo or defense.
   await pool.query(`
