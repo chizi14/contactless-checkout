@@ -1,4 +1,21 @@
-import { QRCodeSVG } from 'qrcode.react'
+import { useEffect, useState } from 'react'
+import QRCode from 'qrcode'
+
+// Draws the QR code as a plain image (no extra React library involved)
+function QrImage({ value, size = 220 }) {
+  const [src, setSrc] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    QRCode.toDataURL(value, { width: size, margin: 1, errorCorrectionLevel: 'M' })
+      .then((url) => { if (!cancelled) setSrc(url) })
+      .catch(() => { if (!cancelled) setSrc('') })
+    return () => { cancelled = true }
+  }, [value, size])
+
+  if (!src) return <div style={{ width: size, height: size }} />
+  return <img src={src} width={size} height={size} alt="Payment QR code" />
+}
 
 function PaymentStatus({ state, data, message, onReset, onRetry, momo, onCancelMomo }) {
   const isMomo = data?.payment_method === 'mobile_money'
@@ -23,9 +40,7 @@ function PaymentStatus({ state, data, message, onReset, onRetry, momo, onCancelM
           </p>
 
           <div className="bg-white p-4 rounded-xl border border-border inline-block mb-4">
-            {momo?.checkout_url && (
-              <QRCodeSVG value={momo.checkout_url} size={220} level="M" />
-            )}
+            {momo?.checkout_url && <QrImage value={momo.checkout_url} size={220} />}
           </div>
 
           <p className="text-text-primary font-bold text-2xl mb-1">
@@ -195,4 +210,4 @@ function PaymentStatus({ state, data, message, onReset, onRetry, momo, onCancelM
   return null
 }
 
-export default PaymentStatus
+export default PaymentStatus.apply
