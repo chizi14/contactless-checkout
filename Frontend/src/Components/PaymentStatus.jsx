@@ -210,4 +210,4 @@ function PaymentStatus({ state, data, message, onReset, onRetry, momo, onCancelM
   return null
 }
 
-export default PaymentStatus.apply
+export default PaymentStatus
