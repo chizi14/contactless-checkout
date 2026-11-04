@@ -216,6 +216,59 @@ router.post('/:id/topup', async (req, res) => {
   res.json({ message: 'Top-up successful', card: result.rows[0] })
 })
 
+// UPDATE the balance: set it to an exact amount (admin correction).
+// A reason is required and the old and new values are logged, so every
+// manual change leaves a record.
+router.patch('/:id/balance', async (req, res) => {
+  const newBalance = Number(req.body.balance)
+  const reason = String(req.body.reason || '').trim()
+
+  if (req.body.balance === '' || req.body.balance === null || !Number.isFinite(newBalance) || newBalance < 0) {
+    return res.status(400).json({ error: 'Enter a valid balance (0 or more)' })
+  }
+  if (newBalance > 10000000) {
+    return res.status(400).json({ error: 'Balance is too large' })
+  }
+  if (!reason) {
+    return res.status(400).json({ error: 'A reason is required' })
+  }
+
+  const client = await db.connect()
+  try {
+    await client.query('BEGIN')
+
+    // Lock the card row so a payment can't change the balance while we edit it
+    const current = await client.query(
+      'SELECT id, owner_name, balance FROM cards WHERE id = $1 FOR UPDATE',
+      [req.params.id]
+    )
+    if (current.rows.length === 0) {
+      await client.query('ROLLBACK')
+      return res.status(404).json({ error: 'Card not found' })
+    }
+
+    const oldBalance = Number(current.rows[0].balance)
+    const result = await client.query(
+      'UPDATE cards SET balance = $1 WHERE id = $2 RETURNING id, owner_name, balance, status',
+      [newBalance, req.params.id]
+    )
+    await client.query('COMMIT')
+
+    log(
+      'balance_adjust',
+      `Balance of ${result.rows[0].owner_name} changed from MWK ${oldBalance} to MWK ${newBalance}. Reason: ${reason}`,
+      { card_id: req.params.id, old_balance: oldBalance, new_balance: newBalance, reason }
+    )
+    res.json({ message: 'Balance updated', card: result.rows[0] })
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {})
+    console.error('Balance update error:', error.message)
+    res.status(500).json({ error: 'Failed to update balance' })
+  } finally {
+    client.release()
+  }
+})
+
 // DELETE a card (only if it has no transaction history)
 router.delete('/:id', async (req, res) => {
   const history = await db.query(

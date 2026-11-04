@@ -42,6 +42,9 @@ function Admin() {
   const [topupAmounts, setTopupAmounts] = useState({});
   const [editingCardId, setEditingCardId] = useState(null);
   const [cardEditName, setCardEditName] = useState("");
+  const [balanceEditId, setBalanceEditId] = useState(null);
+  const [balanceEditValue, setBalanceEditValue] = useState("");
+  const [balanceEditReason, setBalanceEditReason] = useState("");
 
   const navigate = useNavigate();
 
@@ -161,6 +164,35 @@ function Admin() {
     }
   };
 
+  const startBalanceEdit = (c) => {
+    setBalanceEditId(c.id);
+    setBalanceEditValue(String(Number(c.balance || 0)));
+    setBalanceEditReason("");
+  };
+
+  const handleSaveBalance = async (id) => {
+    const value = balanceEditValue === "" ? NaN : Number(balanceEditValue);
+    if (!Number.isFinite(value) || value < 0) {
+      setCardMsg("Enter a valid balance (0 or more)");
+      return;
+    }
+    if (!balanceEditReason.trim()) {
+      setCardMsg("Enter a reason for changing the balance");
+      return;
+    }
+    try {
+      await api.patch(`/cards/${id}/balance`, {
+        balance: value,
+        reason: balanceEditReason,
+      });
+      setCardMsg("Balance updated successfully");
+      setBalanceEditId(null);
+      fetchAll();
+    } catch (err) {
+      setCardMsg(err.response?.data?.error || "Failed to update balance");
+    }
+  };
+
   const startCardEdit = (c) => {
     setEditingCardId(c.id);
     setCardEditName(c.owner_name);
@@ -271,6 +303,7 @@ function Admin() {
     card_update: { emoji: "✏️", color: "bg-surface text-text-secondary" },
     card_status: { emoji: "🔒", color: "bg-surface text-text-secondary" },
     card_topup: { emoji: "💰", color: "bg-success-light text-accent" },
+    balance_adjust: { emoji: "🛠️", color: "bg-surface text-text-secondary" },
     card_delete: { emoji: "🗑️", color: "bg-surface text-text-secondary" },
     server_error: { emoji: "⚠️", color: "bg-danger-light text-danger" },
   };
@@ -800,9 +833,53 @@ function Admin() {
                           </div>
 
                           <div className="flex flex-wrap items-center gap-3">
-                            <span className="text-text-primary text-sm font-semibold">
-                              MWK {money(c.balance)}
-                            </span>
+                            {balanceEditId === c.id ? (
+                              <div className="flex flex-wrap items-center gap-2">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  placeholder="New balance"
+                                  value={balanceEditValue}
+                                  onChange={(e) =>
+                                    setBalanceEditValue(e.target.value)
+                                  }
+                                  className={`${smallInputClass} w-28`}
+                                />
+                                <input
+                                  type="text"
+                                  placeholder="Reason"
+                                  value={balanceEditReason}
+                                  onChange={(e) =>
+                                    setBalanceEditReason(e.target.value)
+                                  }
+                                  className={`${smallInputClass} w-40`}
+                                />
+                                <button
+                                  onClick={() => handleSaveBalance(c.id)}
+                                  className="bg-accent text-white text-xs font-medium px-3 py-2 rounded-lg hover:bg-accent-light transition-colors"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  onClick={() => setBalanceEditId(null)}
+                                  className="text-text-muted text-xs hover:opacity-70"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <span className="text-text-primary text-sm font-semibold">
+                                  MWK {money(c.balance)}
+                                </span>
+                                <button
+                                  onClick={() => startBalanceEdit(c)}
+                                  className="text-accent text-xs font-medium hover:opacity-70"
+                                >
+                                  Edit Balance
+                                </button>
+                              </>
+                            )}
                             <input
                               type="number"
                               placeholder="Amount"
