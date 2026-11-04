@@ -3,7 +3,7 @@ const router = express.Router()
 const bcrypt = require('bcryptjs')
 const db = require('../Database')
 const crypto = require('crypto')
-const { log } = require('../Logger')
+const { log, requestInfo } = require('../Logger')
 
 // Fast, one-way fingerprint of a card UID. The secret lives ONLY in the
 // UID_SECRET environment variable on Render, never in the code.
@@ -29,7 +29,11 @@ router.post('/register', async (req, res) => {
       'INSERT INTO cards (uid_hash, owner_name) VALUES ($1, $2) RETURNING *',
       [uid_hash, owner_name]
     )
-    log('card_register', `Registered card for ${owner_name}`, { card_id: result.rows[0].id })
+    log('card_register', `Registered new card for ${owner_name} (card #${result.rows[0].id})`, {
+      card_id: result.rows[0].id,
+      owner_name,
+      ...requestInfo(req)
+    })
     res.status(201).json({
       message: 'Card registered successfully',
       card_id: result.rows[0].id,
@@ -54,6 +58,7 @@ router.post('/verify', async (req, res) => {
     // Fast path: one indexed lookup (uid_hash is UNIQUE)
     const found = await db.query('SELECT * FROM cards WHERE uid_hash = $1', [hmac])
     let matchedCard = found.rows[0]
+    let upgraded = false
 
     // Old cards still have a slow bcrypt hash. Check only those, and
     // upgrade a match to the fast hash so it is slow at most once.
@@ -61,12 +66,16 @@ router.post('/verify', async (req, res) => {
       const legacy = await db.query("SELECT * FROM cards WHERE uid_hash LIKE '$2%'")
       matchedCard = legacy.rows.find(card => bcrypt.compareSync(uid, card.uid_hash))
       if (matchedCard) {
+        upgraded = true
         await db.query('UPDATE cards SET uid_hash = $1 WHERE id = $2', [hmac, matchedCard.id])
       }
     }
 
     if (!matchedCard) {
-      log('tap_denied', 'Unrecognised card tapped')
+      log('tap_denied', 'Tap denied: card is not registered in the system', {
+        reason: 'card_not_recognised',
+        ...requestInfo(req)
+      })
       lastVerifiedCard = {
         verified: false,
         message: 'Card not recognised',
@@ -79,7 +88,12 @@ router.post('/verify', async (req, res) => {
     }
 
     if (matchedCard.status === 'blocked') {
-      log('tap_denied', `Blocked card tapped: ${matchedCard.owner_name}`, { card_id: matchedCard.id })
+      log('tap_denied', `Tap denied: card #${matchedCard.id} (${matchedCard.owner_name}) is blocked`, {
+        card_id: matchedCard.id,
+        owner_name: matchedCard.owner_name,
+        reason: 'card_blocked',
+        ...requestInfo(req)
+      })
       lastVerifiedCard = {
         verified: false,
         message: 'This card is blocked',
@@ -91,7 +105,13 @@ router.post('/verify', async (req, res) => {
       })
     }
 
-    log('tap_success', `Card tapped: ${matchedCard.owner_name}`, { card_id: matchedCard.id })
+    log('tap_success', `Card #${matchedCard.id} (${matchedCard.owner_name}) tapped and verified`, {
+      card_id: matchedCard.id,
+      owner_name: matchedCard.owner_name,
+      balance: Number(matchedCard.balance),
+      security_upgrade: upgraded ? 'card fingerprint upgraded to the fast format' : undefined,
+      ...requestInfo(req)
+    })
     lastVerifiedCard = {
       verified: true,
       card_id: matchedCard.id,
@@ -161,6 +181,7 @@ router.put('/:id', async (req, res) => {
     return res.status(400).json({ error: 'Owner name is required' })
   }
 
+  const before = await db.query('SELECT owner_name FROM cards WHERE id = $1', [req.params.id])
   const result = await db.query(
     'UPDATE cards SET owner_name = $1 WHERE id = $2 RETURNING id, owner_name, balance, status',
     [owner_name.trim(), req.params.id]
@@ -170,7 +191,13 @@ router.put('/:id', async (req, res) => {
     return res.status(404).json({ error: 'Card not found' })
   }
 
-  log('card_update', `Renamed card #${req.params.id} to ${owner_name.trim()}`, { card_id: req.params.id })
+  const oldName = before.rows[0]?.owner_name
+  log('card_update', `Card #${req.params.id} renamed from "${oldName}" to "${owner_name.trim()}"`, {
+    card_id: req.params.id,
+    old_name: oldName,
+    new_name: owner_name.trim(),
+    ...requestInfo(req)
+  })
   res.json({ message: 'Card updated successfully', card: result.rows[0] })
 })
 
@@ -182,6 +209,7 @@ router.patch('/:id/status', async (req, res) => {
     return res.status(400).json({ error: "Status must be 'active' or 'blocked'" })
   }
 
+  const before = await db.query('SELECT status FROM cards WHERE id = $1', [req.params.id])
   const result = await db.query(
     'UPDATE cards SET status = $1 WHERE id = $2 RETURNING id, owner_name, balance, status',
     [status, req.params.id]
@@ -191,7 +219,13 @@ router.patch('/:id/status', async (req, res) => {
     return res.status(404).json({ error: 'Card not found' })
   }
 
-  log('card_status', `Card #${req.params.id} (${result.rows[0].owner_name}) set to ${status}`, { card_id: req.params.id, status })
+  log('card_status', `Card #${req.params.id} (${result.rows[0].owner_name}) changed from ${before.rows[0]?.status} to ${status}`, {
+    card_id: req.params.id,
+    owner_name: result.rows[0].owner_name,
+    old_status: before.rows[0]?.status,
+    new_status: status,
+    ...requestInfo(req)
+  })
   res.json({ message: `Card ${status} successfully`, card: result.rows[0] })
 })
 
@@ -212,7 +246,16 @@ router.post('/:id/topup', async (req, res) => {
     return res.status(404).json({ error: 'Card not found' })
   }
 
-  log('card_topup', `Topped up ${result.rows[0].owner_name} by MWK ${amount}`, { card_id: req.params.id, amount })
+  const balanceAfter = Number(result.rows[0].balance)
+  log('card_topup', `Topped up card #${req.params.id} (${result.rows[0].owner_name}) by MWK ${amount}`, {
+    card_id: req.params.id,
+    owner_name: result.rows[0].owner_name,
+    amount,
+    balance_before: Math.round((balanceAfter - amount) * 100) / 100,
+    balance_after: balanceAfter,
+    method: 'Manual top-up (admin)',
+    ...requestInfo(req)
+  })
   res.json({ message: 'Top-up successful', card: result.rows[0] })
 })
 
@@ -257,7 +300,15 @@ router.patch('/:id/balance', async (req, res) => {
     log(
       'balance_adjust',
       `Balance of ${result.rows[0].owner_name} changed from MWK ${oldBalance} to MWK ${newBalance}. Reason: ${reason}`,
-      { card_id: req.params.id, old_balance: oldBalance, new_balance: newBalance, reason }
+      {
+        card_id: req.params.id,
+        owner_name: result.rows[0].owner_name,
+        old_balance: oldBalance,
+        new_balance: newBalance,
+        difference: Math.round((newBalance - oldBalance) * 100) / 100,
+        reason,
+        ...requestInfo(req)
+      }
     )
     res.json({ message: 'Balance updated', card: result.rows[0] })
   } catch (error) {
@@ -283,7 +334,7 @@ router.delete('/:id', async (req, res) => {
   }
 
   const result = await db.query(
-    'DELETE FROM cards WHERE id = $1 RETURNING id',
+    'DELETE FROM cards WHERE id = $1 RETURNING id, owner_name, balance',
     [req.params.id]
   )
 
@@ -291,7 +342,12 @@ router.delete('/:id', async (req, res) => {
     return res.status(404).json({ error: 'Card not found' })
   }
 
-  log('card_delete', `Deleted card #${req.params.id}`, { card_id: req.params.id })
+  log('card_delete', `Deleted card #${req.params.id} (${result.rows[0].owner_name})`, {
+    card_id: req.params.id,
+    owner_name: result.rows[0].owner_name,
+    balance_at_deletion: Number(result.rows[0].balance),
+    ...requestInfo(req)
+  })
   res.json({ message: 'Card deleted successfully' })
 })
 

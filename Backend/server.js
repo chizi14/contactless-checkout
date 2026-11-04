@@ -3,6 +3,9 @@ const cors = require('cors')
 const http = require('http')
 const app = express()
 
+// Render sits behind a proxy; this makes req.ip the real client address
+app.set('trust proxy', 1)
+
 app.use(cors())
 app.use(express.json())
 

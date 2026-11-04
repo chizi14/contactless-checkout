@@ -1,7 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const db = require('../Database')
-const { log } = require('../Logger')
+const { log, requestInfo } = require('../Logger')
 
 let lastScannedProduct = null
 
@@ -42,7 +42,7 @@ router.get('/:barcode', async (req, res) => {
 
 // CREATE a product
 router.post('/', async (req, res) => {
-  const { barcode, name, price, stock } = req.body
+  const { barcode, name, price, stock, reorder_level } = req.body
 
   if (!barcode || !name || !price) {
     return res.status(400).json({ error: 'Barcode, name and price are required' })
@@ -58,19 +58,34 @@ router.post('/', async (req, res) => {
     return res.status(400).json({ error: 'Stock must be zero or a positive whole number' })
   }
 
+  // The stock level at which this product should be reordered (default 20)
+  const reorderValue = reorder_level === undefined || reorder_level === '' ? 20 : parseInt(reorder_level, 10)
+  if (isNaN(reorderValue) || reorderValue < 1) {
+    return res.status(400).json({ error: 'Reorder level must be a whole number of 1 or more' })
+  }
+
   try {
     const result = await db.query(
-      'INSERT INTO products (barcode, name, price, stock) VALUES ($1, $2, $3, $4) RETURNING *',
-      [barcode, name, parseFloat(price), stockValue]
+      'INSERT INTO products (barcode, name, price, stock, reorder_level) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [barcode, name, parseFloat(price), stockValue, reorderValue]
     )
-    log('product_create', `Added product: ${name} (${barcode})`, { product_id: result.rows[0].id })
+    log('product_create', `Added product "${name}" (barcode ${barcode}) at MWK ${parseFloat(price)} with ${stockValue} in stock`, {
+      product_id: result.rows[0].id,
+      name,
+      barcode,
+      price: parseFloat(price),
+      stock: stockValue,
+      reorder_level: reorderValue,
+      ...requestInfo(req)
+    })
     res.status(201).json({
       message: 'Product added successfully',
       product_id: result.rows[0].id,
       name,
       barcode,
       price: parseFloat(price),
-      stock: stockValue
+      stock: stockValue,
+      reorder_level: reorderValue
     })
   } catch (error) {
     res.status(409).json({ error: 'Product with this barcode already exists' })
@@ -86,18 +101,30 @@ router.post('/scanner/item', async (req, res) => {
     [barcode]
   )
   if (result.rows.length === 0) {
-    log('scan_denied', `Scanned unknown barcode: ${barcode}`, { barcode })
+    log('scan_denied', `Scan denied: barcode ${barcode} is not in the product list`, {
+      barcode,
+      reason: 'product_not_found',
+      ...requestInfo(req)
+    })
     return res.status(404).json({ error: 'Product not found' })
   }
 
-  log('scan_success', `Scanned: ${result.rows[0].name}`, { barcode })
+  const scanned = result.rows[0]
+  log('scan_success', `Scanned "${scanned.name}" (MWK ${scanned.price}, ${scanned.stock} in stock)`, {
+    product_id: scanned.id,
+    name: scanned.name,
+    barcode,
+    price: Number(scanned.price),
+    stock: Number(scanned.stock),
+    ...requestInfo(req)
+  })
   lastScannedProduct = { ...result.rows[0], timestamp: Date.now() }
   res.json({ success: true, product: result.rows[0] })
 })
 
 // UPDATE a product (name, price and stock; the barcode stays fixed)
 router.put('/:id', async (req, res) => {
-  const { name, price, stock } = req.body
+  const { name, price, stock, reorder_level } = req.body
 
   if (!name || !price) {
     return res.status(400).json({ error: 'Name and price are required' })
@@ -112,29 +139,58 @@ router.put('/:id', async (req, res) => {
     return res.status(400).json({ error: 'Stock must be zero or a positive whole number' })
   }
 
-  const result = await db.query(
-    'UPDATE products SET name = $1, price = $2, stock = $3 WHERE id = $4 RETURNING *',
-    [name, parseFloat(price), stockValue, req.params.id]
-  )
-
-  if (result.rows.length === 0) {
+  const before = await db.query('SELECT * FROM products WHERE id = $1', [req.params.id])
+  if (before.rows.length === 0) {
     return res.status(404).json({ error: 'Product not found' })
   }
+  const old = before.rows[0]
 
-  log('product_update', `Updated product #${req.params.id}: ${name}`, { product_id: req.params.id })
+  // If no reorder level is sent, keep the one the product already has
+  const reorderValue = reorder_level === undefined || reorder_level === '' ? Number(old.reorder_level) : parseInt(reorder_level, 10)
+  if (isNaN(reorderValue) || reorderValue < 1) {
+    return res.status(400).json({ error: 'Reorder level must be a whole number of 1 or more' })
+  }
+
+  const result = await db.query(
+    'UPDATE products SET name = $1, price = $2, stock = $3, reorder_level = $4 WHERE id = $5 RETURNING *',
+    [name, parseFloat(price), stockValue, reorderValue, req.params.id]
+  )
+
+  // Record exactly what changed, old value to new value
+  const changes = {}
+  if (old.name !== name) changes.name = { from: old.name, to: name }
+  if (Number(old.price) !== parseFloat(price)) changes.price = { from: Number(old.price), to: parseFloat(price) }
+  if (Number(old.stock) !== stockValue) changes.stock = { from: Number(old.stock), to: stockValue }
+  if (Number(old.reorder_level) !== reorderValue) changes.reorder_level = { from: Number(old.reorder_level), to: reorderValue }
+  const changedList = Object.keys(changes).join(', ') || 'nothing changed'
+
+  log('product_update', `Updated product #${req.params.id} "${old.name}": ${changedList}`, {
+    product_id: req.params.id,
+    barcode: old.barcode,
+    changes,
+    ...requestInfo(req)
+  })
   res.json({ message: 'Product updated successfully', product: result.rows[0] })
 })
 
 // DELETE a product
 router.delete('/:id', async (req, res) => {
   const result = await db.query(
-    'DELETE FROM products WHERE id = $1 RETURNING id',
+    'DELETE FROM products WHERE id = $1 RETURNING id, name, barcode, price, stock',
     [req.params.id]
   )
   if (result.rows.length === 0) {
     return res.status(404).json({ error: 'Product not found' })
   }
-  log('product_delete', `Deleted product #${req.params.id}`, { product_id: req.params.id })
+  const gone = result.rows[0]
+  log('product_delete', `Deleted product #${req.params.id} "${gone.name}" (barcode ${gone.barcode})`, {
+    product_id: req.params.id,
+    name: gone.name,
+    barcode: gone.barcode,
+    price: Number(gone.price),
+    stock_at_deletion: Number(gone.stock),
+    ...requestInfo(req)
+  })
   res.json({ message: 'Product deleted successfully' })
 })
 

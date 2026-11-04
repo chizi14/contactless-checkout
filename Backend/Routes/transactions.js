@@ -1,7 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const db = require('../Database')
-const { log } = require('../Logger')
+const { log, requestInfo } = require('../Logger')
 
 // Transactions are financial records: they can be created and read,
 // but never edited or deleted. Mistakes are fixed with a void/refund.
@@ -79,6 +79,12 @@ router.post('/', async (req, res) => {
     const card = cardResult.rows[0]
     const balance = Number(card.balance)
 
+    const reasonText = {
+      card_blocked: 'card is blocked',
+      insufficient_funds: 'insufficient funds',
+      insufficient_stock: 'not enough stock'
+    }
+
     // Declined: save a record of the attempt, then tell the kiosk why
     const decline = async (httpStatus, reason, message, extra = {}) => {
       await client.query(
@@ -87,7 +93,18 @@ router.post('/', async (req, res) => {
         [card_id, total, JSON.stringify(lines), reason]
       )
       await client.query('COMMIT')
-      log('payment_declined', `Sale declined (${reason}) — card #${card_id}, MWK ${total}`, { card_id, reason, total })
+      log('payment_declined', `Sale declined for ${card.owner_name} (card #${card_id}): ${reasonText[reason] || reason}, total MWK ${total}`, {
+        card_id,
+        owner_name: card.owner_name,
+        reason,
+        reason_detail: message,
+        total,
+        card_balance: balance,
+        shortfall: reason === 'insufficient_funds' ? Math.round((total - balance) * 100) / 100 : undefined,
+        items: lines,
+        ...extra,
+        ...requestInfo(req)
+      })
       return res.status(httpStatus).json({
         approved: false,
         reason,
@@ -109,21 +126,32 @@ router.post('/', async (req, res) => {
     // Take stock for each item ONE AT A TIME. The WHERE clause only succeeds
     // if there's enough stock left, so this can't be tricked by two sales
     // happening at the same moment (Postgres locks the row during the update).
+    const stockAlerts = []
     for (const line of lines) {
       const stockUpdate = await client.query(
         `UPDATE products SET stock = stock - $1
          WHERE barcode = $2 AND stock >= $1
-         RETURNING stock`,
+         RETURNING stock, reorder_level`,
         [line.quantity, line.barcode]
       )
 
       if (stockUpdate.rows.length === 0) {
+        // Undo any stock already taken for earlier items in this basket,
+        // then record the decline in a fresh step
+        await client.query('ROLLBACK')
+        await client.query('BEGIN')
         return await decline(
           409,
           'insufficient_stock',
           `Not enough stock for ${line.name}`,
           { out_of_stock_item: line.name }
         )
+      }
+
+      const left = Number(stockUpdate.rows[0].stock)
+      const reorderAt = Number(stockUpdate.rows[0].reorder_level)
+      if (left <= reorderAt) {
+        stockAlerts.push({ name: line.name, barcode: line.barcode, stock_left: left, reorder_level: reorderAt })
       }
     }
 
@@ -141,10 +169,28 @@ router.post('/', async (req, res) => {
 
     await client.query('COMMIT')
 
-    log('payment_approved', `Sale approved for ${card.owner_name}: MWK ${total}`, {
-      card_id,
+    const receipt = `RCP-${String(inserted.rows[0].id).padStart(6, '0')}`
+    const balanceAfter = Number(updated.rows[0].balance)
+    const itemCount = lines.reduce((sum, l) => sum + l.quantity, 0)
+
+    log('payment_approved', `Sale approved for ${card.owner_name} (card #${card_id}): ${receipt}, ${itemCount} item${itemCount === 1 ? '' : 's'}, MWK ${total}`, {
       transaction_id: inserted.rows[0].id,
-      total
+      receipt,
+      card_id,
+      owner_name: card.owner_name,
+      items: lines,
+      item_count: itemCount,
+      total,
+      balance_before: balance,
+      balance_after: balanceAfter,
+      ...requestInfo(req)
+    })
+
+    stockAlerts.forEach(a => {
+      log('stock_alert', `${a.name} is ${a.stock_left === 0 ? 'out of stock' : `down to ${a.stock_left}`} (reorder level ${a.reorder_level})`, {
+        ...a,
+        triggered_by: receipt
+      })
     })
 
     res.status(201).json({
@@ -161,7 +207,12 @@ router.post('/', async (req, res) => {
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {})
     console.error('Payment error:', error.message)
-    log('server_error', `Payment error: ${error.message}`, { card_id })
+    log('server_error', `Payment error for card #${card_id}: ${error.message}`, {
+      card_id,
+      error: error.message,
+      items,
+      ...requestInfo(req)
+    })
     res.status(500).json({
       approved: false,
       reason: 'server_error',

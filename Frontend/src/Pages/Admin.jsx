@@ -1,9 +1,12 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../API/Axios";
 import {
   BarChart,
   Bar,
+  AreaChart,
+  Area,
+  CartesianGrid,
   XAxis,
   YAxis,
   Tooltip,
@@ -16,6 +19,199 @@ import {
 
 // Safe money formatter: never crashes if a value is missing
 const money = (n) => Number(n || 0).toLocaleString();
+
+// ---------- Small shared pieces for charts and logs ----------
+
+const AXIS_TICK = { fontSize: 11, fill: "#6c757d" };
+
+const TipBox = ({ title, rows }) => (
+  <div className="bg-secondary border border-border rounded-lg shadow-card px-3 py-2 text-xs">
+    {title && <p className="text-text-primary font-semibold mb-1">{title}</p>}
+    {rows.map(([label, value]) => (
+      <p key={label} className="text-text-secondary">
+        {label}: <span className="text-text-primary font-medium">{value}</span>
+      </p>
+    ))}
+  </div>
+);
+
+const AmountTip = ({ active, payload }) => {
+  if (!active || !payload || !payload.length) return null;
+  const d = payload[0].payload;
+  return <TipBox title={`Sale ${d.name}`} rows={[["Amount", `MWK ${money(d.amount)}`]]} />;
+};
+
+const PieTip = ({ active, payload }) => {
+  if (!active || !payload || !payload.length) return null;
+  return <TipBox title={payload[0].name} rows={[["Count", payload[0].value]]} />;
+};
+
+// Stock is judged against each product's own reorder level, like a real
+// supermarket: Out = 0, Critical = half the reorder level or less,
+// Low = at or below the reorder level, Healthy = above it.
+const STOCK_STATUS = {
+  out: { label: "Out of stock", color: "#c84c3c", badge: "bg-danger-light text-danger" },
+  critical: { label: "Critical", color: "#e07a3a", badge: "bg-orange-100 text-orange-700" },
+  low: { label: "Low", color: "#e0a62b", badge: "bg-yellow-100 text-yellow-700" },
+  healthy: { label: "Healthy", color: "#2d6a4f", badge: "bg-surface text-text-secondary" },
+};
+
+const getStockStatus = (stock, reorderLevel) => {
+  const s = Number(stock || 0);
+  const r = Number(reorderLevel || 20);
+  if (s <= 0) return "out";
+  if (s <= Math.ceil(r / 2)) return "critical";
+  if (s <= r) return "low";
+  return "healthy";
+};
+
+const StockTip = ({ active, payload }) => {
+  if (!active || !payload || !payload.length) return null;
+  const d = payload[0].payload;
+  return (
+    <TipBox
+      title={d.fullName}
+      rows={[
+        ["In stock", d.stock],
+        ["Reorder level", d.reorder],
+        ["Status", STOCK_STATUS[d.status].label],
+      ]}
+    />
+  );
+};
+
+function DonutCard({ title, data, colorFor, emptyText }) {
+  const total = data.reduce((sum, d) => sum + d.value, 0);
+  return (
+    <div className="bg-secondary rounded-xl p-5 border border-border">
+      <h3 className="text-text-primary font-semibold mb-4">{title}</h3>
+      {data.length === 0 ? (
+        <div className="h-[240px] flex items-center justify-center text-text-muted text-sm">
+          {emptyText}
+        </div>
+      ) : (
+        <>
+          <div className="relative">
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie
+                  data={data}
+                  dataKey="value"
+                  nameKey="name"
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={58}
+                  outerRadius={84}
+                  paddingAngle={3}
+                  cornerRadius={6}
+                  stroke="none"
+                >
+                  {data.map((d, i) => (
+                    <Cell key={d.name} fill={colorFor(d, i)} />
+                  ))}
+                </Pie>
+                <Tooltip content={<PieTip />} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+              <span className="text-text-primary text-2xl font-bold">{total}</span>
+              <span className="text-text-muted text-xs">total</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 mt-3">
+            {data.map((d, i) => (
+              <span key={d.name} className="flex items-center gap-1.5 text-xs text-text-secondary">
+                <span
+                  className="w-2.5 h-2.5 rounded-full"
+                  style={{ background: colorFor(d, i) }}
+                />
+                {d.name}
+                <span className="text-text-primary font-medium">{d.value}</span>
+                <span className="text-text-muted">({Math.round((d.value / total) * 100)}%)</span>
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ----- Activity log helpers -----
+
+const logCategory = (type) => {
+  if (type.startsWith("tap_")) return "taps";
+  if (type.startsWith("scan_")) return "scans";
+  if (type.startsWith("payment_")) return "payments";
+  if (type.startsWith("card_") || type === "balance_adjust") return "cards";
+  if (type.startsWith("product_") || type === "stock_alert") return "products";
+  if (type === "server_error") return "errors";
+  return "other";
+};
+
+const LOG_FILTERS = [
+  ["all", "All"],
+  ["taps", "Taps"],
+  ["scans", "Scans"],
+  ["payments", "Payments"],
+  ["cards", "Cards"],
+  ["products", "Products & Stock"],
+  ["errors", "Errors"],
+];
+
+const parseMeta = (raw) => {
+  try {
+    const m = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return m && typeof m === "object" ? m : {};
+  } catch {
+    return {};
+  }
+};
+
+const MONEY_KEYS = [
+  "balance", "balance_before", "balance_after", "total", "amount", "price",
+  "old_balance", "new_balance", "difference", "shortfall", "card_balance",
+  "balance_at_deletion",
+];
+
+function MetaValue({ k, v }) {
+  if (Array.isArray(v)) {
+    return (
+      <div className="space-y-0.5">
+        {v.map((item, i) =>
+          item && typeof item === "object" && item.name ? (
+            <div key={i}>
+              {item.quantity} × {item.name}
+              {item.price !== undefined ? ` @ MWK ${money(item.price)}` : ""}
+            </div>
+          ) : (
+            <div key={i}>{JSON.stringify(item)}</div>
+          )
+        )}
+      </div>
+    );
+  }
+  if (v && typeof v === "object") {
+    if ("from" in v && "to" in v) {
+      const fmt = (x) => (MONEY_KEYS.includes(k) ? `MWK ${money(x)}` : String(x));
+      return <span>{fmt(v.from)} → {fmt(v.to)}</span>;
+    }
+    return (
+      <div className="space-y-0.5">
+        {Object.entries(v).map(([key, val]) => (
+          <div key={key}>
+            <span className="text-text-muted capitalize">{key.replace(/_/g, " ")}: </span>
+            <MetaValue k={key} v={val} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (MONEY_KEYS.includes(k) && v !== "" && !isNaN(Number(v))) {
+    return <span>MWK {money(v)}</span>;
+  }
+  return <span>{String(v)}</span>;
+}
 
 function Admin() {
   const [activeTab, setActiveTab] = useState("transactions");
@@ -31,10 +227,11 @@ function Admin() {
     name: "",
     price: "",
     stock: "",
+    reorder_level: "",
   });
   const [productMsg, setProductMsg] = useState("");
   const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm] = useState({ name: "", price: "", stock: "" });
+  const [editForm, setEditForm] = useState({ name: "", price: "", stock: "", reorder_level: "" });
 
   // Card state
   const [cardForm, setCardForm] = useState({ uid: "", owner_name: "" });
@@ -42,6 +239,9 @@ function Admin() {
   const [topupAmounts, setTopupAmounts] = useState({});
   const [editingCardId, setEditingCardId] = useState(null);
   const [cardEditName, setCardEditName] = useState("");
+  const [logFilter, setLogFilter] = useState("all");
+  const [logSearch, setLogSearch] = useState("");
+  const [expandedLogId, setExpandedLogId] = useState(null);
   const [balanceEditId, setBalanceEditId] = useState(null);
   const [balanceEditValue, setBalanceEditValue] = useState("");
   const [balanceEditReason, setBalanceEditReason] = useState("");
@@ -61,7 +261,7 @@ function Admin() {
         api.get("/transactions"),
         api.get("/products"),
         api.get("/cards"),
-        api.get("/logs?limit=150"),
+        api.get("/logs?limit=300"),
       ]);
       setTransactions(t.data);
       setProducts(p.data);
@@ -85,9 +285,10 @@ function Admin() {
         name: productForm.name,
         price: parseFloat(productForm.price),
         stock: productForm.stock === "" ? 0 : parseInt(productForm.stock, 10),
+        reorder_level: productForm.reorder_level === "" ? 20 : parseInt(productForm.reorder_level, 10),
       });
       setProductMsg("Product added successfully");
-      setProductForm({ barcode: "", name: "", price: "", stock: "" });
+      setProductForm({ barcode: "", name: "", price: "", stock: "", reorder_level: "" });
       fetchAll();
     } catch (err) {
       setProductMsg("Failed to add product. Barcode may already exist.");
@@ -96,7 +297,12 @@ function Admin() {
 
   const startEdit = (p) => {
     setEditingId(p.id);
-    setEditForm({ name: p.name, price: String(p.price), stock: String(p.stock ?? 0) });
+    setEditForm({
+      name: p.name,
+      price: String(p.price),
+      stock: String(p.stock ?? 0),
+      reorder_level: String(p.reorder_level ?? 20),
+    });
   };
 
   const handleUpdateProduct = async (id) => {
@@ -109,6 +315,7 @@ function Admin() {
         name: editForm.name,
         price: parseFloat(editForm.price),
         stock: editForm.stock === "" ? 0 : parseInt(editForm.stock, 10),
+        reorder_level: editForm.reorder_level === "" ? 20 : parseInt(editForm.reorder_level, 10),
       });
       setProductMsg("Product updated successfully");
       setEditingId(null);
@@ -242,7 +449,8 @@ function Admin() {
 
   const chartData = transactions
     .filter((t) => t.status === "approved")
-    .slice(0, 7)
+    .slice(0, 10)
+    .reverse()
     .map((t) => ({
     name: `#${t.id}`,
     amount: Number(t.total_amount || 0),
@@ -276,37 +484,54 @@ function Admin() {
     value,
   }));
 
-  const PIE_COLORS = ["#2d6a4f", "#e07a5f", "#f2cc8f", "#3d405b", "#81b29a"];
+  const PIE_COLORS = ["#2d6a4f", "#e07a5f", "#f2b84b", "#5b6c8f", "#81b29a"];
 
-  const stockBarData = products.map((p) => ({
-    name: p.name.length > 10 ? p.name.slice(0, 10) + "…" : p.name,
-    stock: Number(p.stock || 0),
-  }));
+  const stockBarData = products.map((p) => {
+    const status = getStockStatus(p.stock, p.reorder_level);
+    return {
+      name: p.name.length > 10 ? p.name.slice(0, 10) + "…" : p.name,
+      fullName: p.name,
+      stock: Number(p.stock || 0),
+      reorder: Number(p.reorder_level ?? 20),
+      status,
+    };
+  });
 
-  const stockColor = (stock) => {
-    if (stock === 0) return "#c84c3c";
-    if (stock <= 5) return "#e0a62b";
-    return "#2d6a4f";
-  };
+  const stockCounts = { out: 0, critical: 0, low: 0, healthy: 0 };
+  stockBarData.forEach((d) => {
+    stockCounts[d.status] += 1;
+  });
 
   const logTypeStyle = {
-    tap_success: { emoji: "💳", color: "bg-success-light text-accent" },
-    tap_denied: { emoji: "🚫", color: "bg-danger-light text-danger" },
-    scan_success: { emoji: "📦", color: "bg-success-light text-accent" },
-    scan_denied: { emoji: "❓", color: "bg-yellow-100 text-yellow-700" },
-    payment_approved: { emoji: "✅", color: "bg-success-light text-accent" },
-    payment_declined: { emoji: "❌", color: "bg-danger-light text-danger" },
-    product_create: { emoji: "🆕", color: "bg-surface text-text-secondary" },
-    product_update: { emoji: "✏️", color: "bg-surface text-text-secondary" },
-    product_delete: { emoji: "🗑️", color: "bg-surface text-text-secondary" },
-    card_register: { emoji: "🪪", color: "bg-surface text-text-secondary" },
-    card_update: { emoji: "✏️", color: "bg-surface text-text-secondary" },
-    card_status: { emoji: "🔒", color: "bg-surface text-text-secondary" },
-    card_topup: { emoji: "💰", color: "bg-success-light text-accent" },
-    balance_adjust: { emoji: "🛠️", color: "bg-surface text-text-secondary" },
-    card_delete: { emoji: "🗑️", color: "bg-surface text-text-secondary" },
-    server_error: { emoji: "⚠️", color: "bg-danger-light text-danger" },
+    tap_success: { color: "bg-success-light text-accent" },
+    tap_denied: { color: "bg-danger-light text-danger" },
+    scan_success: { color: "bg-success-light text-accent" },
+    scan_denied: { color: "bg-yellow-100 text-yellow-700" },
+    payment_approved: { color: "bg-success-light text-accent" },
+    payment_declined: { color: "bg-danger-light text-danger" },
+    product_create: { color: "bg-surface text-text-secondary" },
+    product_update: { color: "bg-surface text-text-secondary" },
+    product_delete: { color: "bg-surface text-text-secondary" },
+    stock_alert: { color: "bg-yellow-100 text-yellow-700" },
+    card_register: { color: "bg-surface text-text-secondary" },
+    card_update: { color: "bg-surface text-text-secondary" },
+    card_status: { color: "bg-surface text-text-secondary" },
+    card_topup: { color: "bg-success-light text-accent" },
+    balance_adjust: { color: "bg-surface text-text-secondary" },
+    card_delete: { color: "bg-surface text-text-secondary" },
+    server_error: { color: "bg-danger-light text-danger" },
   };
+
+  const filteredLogs = logs.filter((entry) => {
+    if (logFilter !== "all" && logCategory(entry.type) !== logFilter) return false;
+    const q = logSearch.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      entry.message.toLowerCase().includes(q) ||
+      entry.type.toLowerCase().includes(q) ||
+      String(entry.meta_json || "").toLowerCase().includes(q)
+    );
+  });
 
   const tabs = ["transactions", "products", "cards", "logs"];
 
@@ -388,89 +613,51 @@ function Admin() {
                 {transactions.length > 0 && (
                   <div className="bg-secondary rounded-xl p-5 border border-border">
                     <h3 className="text-text-primary font-semibold mb-4">
-                      Transaction Amounts
+                      Recent Sales (MWK)
                     </h3>
-                    <ResponsiveContainer width="100%" height={200}>
-                      <BarChart data={chartData}>
-                        <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                        <YAxis tick={{ fontSize: 12 }} />
-                        <Tooltip
-                          formatter={(value) => [
-                            `MWK ${money(value)}`,
-                            "Amount",
-                          ]}
-                        />
-                        <Bar
+                    <ResponsiveContainer width="100%" height={240}>
+                      <AreaChart
+                        data={chartData}
+                        margin={{ top: 10, right: 12, left: -8, bottom: 0 }}
+                      >
+                        <defs>
+                          <linearGradient id="amountFill" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#2d6a4f" stopOpacity={0.35} />
+                            <stop offset="100%" stopColor="#2d6a4f" stopOpacity={0.02} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e9ecef" />
+                        <XAxis dataKey="name" tick={AXIS_TICK} axisLine={false} tickLine={false} />
+                        <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} />
+                        <Tooltip content={<AmountTip />} />
+                        <Area
+                          type="monotone"
                           dataKey="amount"
-                          fill="#2d6a4f"
-                          radius={[4, 4, 0, 0]}
+                          stroke="#2d6a4f"
+                          strokeWidth={3}
+                          fill="url(#amountFill)"
+                          dot={{ r: 4, fill: "#ffffff", stroke: "#2d6a4f", strokeWidth: 2 }}
+                          activeDot={{ r: 6 }}
                         />
-                      </BarChart>
+                      </AreaChart>
                     </ResponsiveContainer>
                   </div>
                 )}
 
                 {transactions.length > 0 && (
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-secondary rounded-xl p-5 border border-border">
-                      <h3 className="text-text-primary font-semibold mb-4">
-                        Approved vs Declined
-                      </h3>
-                      <ResponsiveContainer width="100%" height={220}>
-                        <PieChart>
-                          <Pie
-                            data={statusPieData}
-                            dataKey="value"
-                            nameKey="name"
-                            cx="50%"
-                            cy="50%"
-                            outerRadius={75}
-                            label={({ name, value }) => `${name}: ${value}`}
-                          >
-                            {statusPieData.map((entry, i) => (
-                              <Cell
-                                key={entry.name}
-                                fill={entry.name === "Approved" ? "#2d6a4f" : "#c84c3c"}
-                              />
-                            ))}
-                          </Pie>
-                          <Tooltip />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-
-                    <div className="bg-secondary rounded-xl p-5 border border-border">
-                      <h3 className="text-text-primary font-semibold mb-4">
-                        Why Sales Were Declined
-                      </h3>
-                      {reasonPieData.length === 0 ? (
-                        <div className="h-[220px] flex items-center justify-center text-text-muted text-sm">
-                          No declines yet
-                        </div>
-                      ) : (
-                        <ResponsiveContainer width="100%" height={220}>
-                          <PieChart>
-                            <Pie
-                              data={reasonPieData}
-                              dataKey="value"
-                              nameKey="name"
-                              cx="50%"
-                              cy="50%"
-                              outerRadius={75}
-                              label={({ name, value }) => `${name}: ${value}`}
-                            >
-                              {reasonPieData.map((entry, i) => (
-                                <Cell
-                                  key={entry.name}
-                                  fill={PIE_COLORS[i % PIE_COLORS.length]}
-                                />
-                              ))}
-                            </Pie>
-                            <Tooltip />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      )}
-                    </div>
+                    <DonutCard
+                      title="Approved vs Declined"
+                      data={statusPieData}
+                      colorFor={(d) => (d.name === "Approved" ? "#2d6a4f" : "#c84c3c")}
+                      emptyText="No sales yet"
+                    />
+                    <DonutCard
+                      title="Why Sales Were Declined"
+                      data={reasonPieData}
+                      colorFor={(d, i) => PIE_COLORS[i % PIE_COLORS.length]}
+                      emptyText="No declines yet"
+                    />
                   </div>
                 )}
 
@@ -529,18 +716,20 @@ function Admin() {
                   <h3 className="text-text-primary font-semibold mb-4">
                     Add New Product
                   </h3>
-                  <div className="grid grid-cols-4 gap-3 mb-3">
-                    {["barcode", "name", "price", "stock"].map((field) => (
+                  <div className="grid grid-cols-5 gap-3 mb-3">
+                    {["barcode", "name", "price", "stock", "reorder_level"].map((field) => (
                       <input
                         key={field}
                         type={
-                          field === "price" || field === "stock"
+                          field === "price" || field === "stock" || field === "reorder_level"
                             ? "number"
                             : "text"
                         }
                         placeholder={
                           field === "stock"
                             ? "Stock (0 if unset)"
+                            : field === "reorder_level"
+                            ? "Reorder level (default 20)"
                             : field.charAt(0).toUpperCase() + field.slice(1)
                         }
                         value={productForm[field]}
@@ -578,24 +767,48 @@ function Admin() {
                     <h3 className="text-text-primary font-semibold mb-1">
                       Stock Levels
                     </h3>
-                    <p className="text-text-muted text-xs mb-4">
-                      Green: healthy · Yellow: 5 or fewer · Red: out of stock
+                    <p className="text-text-muted text-xs mb-3">
+                      Each product is checked against its own reorder level
                     </p>
-                    <ResponsiveContainer width="100%" height={220}>
-                      <BarChart data={stockBarData}>
+                    <div className="flex flex-wrap gap-2 mb-4">
+                      {Object.entries(STOCK_STATUS).map(([key, st]) => (
+                        <span
+                          key={key}
+                          className={`text-xs px-2.5 py-1 rounded-full font-medium ${st.badge}`}
+                        >
+                          {st.label}: {stockCounts[key]}
+                        </span>
+                      ))}
+                    </div>
+                    <ResponsiveContainer width="100%" height={260}>
+                      <BarChart
+                        data={stockBarData}
+                        margin={{ top: 8, right: 8, left: -12, bottom: 0 }}
+                      >
+                        <defs>
+                          {Object.entries(STOCK_STATUS).map(([key, st]) => (
+                            <linearGradient key={key} id={`stock-${key}`} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor={st.color} stopOpacity={1} />
+                              <stop offset="100%" stopColor={st.color} stopOpacity={0.55} />
+                            </linearGradient>
+                          ))}
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e9ecef" />
                         <XAxis
                           dataKey="name"
-                          tick={{ fontSize: 11 }}
+                          tick={AXIS_TICK}
                           interval={0}
                           angle={-20}
                           textAnchor="end"
                           height={50}
+                          axisLine={false}
+                          tickLine={false}
                         />
-                        <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                        <Tooltip />
-                        <Bar dataKey="stock" radius={[4, 4, 0, 0]}>
+                        <YAxis tick={AXIS_TICK} allowDecimals={false} axisLine={false} tickLine={false} />
+                        <Tooltip content={<StockTip />} cursor={{ fill: "rgba(45,106,79,0.06)" }} />
+                        <Bar dataKey="stock" radius={[8, 8, 0, 0]} maxBarSize={36}>
                           {stockBarData.map((entry, i) => (
-                            <Cell key={i} fill={stockColor(entry.stock)} />
+                            <Cell key={i} fill={`url(#stock-${entry.status})`} />
                           ))}
                         </Bar>
                       </BarChart>
@@ -664,6 +877,18 @@ function Admin() {
                                 }
                                 className={`${smallInputClass} w-20`}
                               />
+                              <input
+                                type="number"
+                                placeholder="Reorder"
+                                value={editForm.reorder_level}
+                                onChange={(e) =>
+                                  setEditForm((prev) => ({
+                                    ...prev,
+                                    reorder_level: e.target.value,
+                                  }))
+                                }
+                                className={`${smallInputClass} w-20`}
+                              />
                               <button
                                 onClick={() => handleUpdateProduct(p.id)}
                                 className="text-accent text-xs font-medium hover:opacity-70"
@@ -684,16 +909,18 @@ function Admin() {
                               </p>
                               <span
                                 className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                                  Number(p.stock) === 0
-                                    ? "bg-danger-light text-danger"
-                                    : Number(p.stock) <= 5
-                                    ? "bg-yellow-100 text-yellow-700"
-                                    : "bg-surface text-text-secondary"
+                                  STOCK_STATUS[getStockStatus(p.stock, p.reorder_level)].badge
                                 }`}
                               >
-                                {Number(p.stock) === 0
-                                  ? "Out of stock"
-                                  : `${p.stock} in stock`}
+                                {(() => {
+                                  const st = getStockStatus(p.stock, p.reorder_level);
+                                  if (st === "out") return "Out of stock";
+                                  if (st === "healthy") return `${p.stock} in stock`;
+                                  return `${p.stock} left · ${STOCK_STATUS[st].label}`;
+                                })()}
+                              </span>
+                              <span className="text-text-muted text-xs">
+                                Reorder at {p.reorder_level ?? 20}
                               </span>
                               <button
                                 onClick={() => startEdit(p)}
@@ -928,43 +1155,101 @@ function Admin() {
             {/* Logs tab */}
             {activeTab === "logs" && (
               <div className="bg-secondary rounded-xl border border-border overflow-hidden">
-                <div className="px-5 py-4 border-b border-border">
-                  <h3 className="text-text-primary font-semibold">
-                    Activity Log
-                  </h3>
-                  <p className="text-text-muted text-xs mt-0.5">
-                    Every card tap, scan, payment and admin action, newest first
+                <div className="px-5 py-4 border-b border-border space-y-3">
+                  <div>
+                    <h3 className="text-text-primary font-semibold">Activity Log</h3>
+                    <p className="text-text-muted text-xs mt-0.5">
+                      Every card tap, scan, payment, stock alert and admin action, newest first.
+                      Click an entry to see its full details.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {LOG_FILTERS.map(([key, label]) => (
+                      <button
+                        key={key}
+                        onClick={() => setLogFilter(key)}
+                        className={`text-xs px-3 py-1.5 rounded-full font-medium transition-colors ${
+                          logFilter === key
+                            ? "bg-accent text-white"
+                            : "bg-surface text-text-secondary hover:opacity-70"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                    <input
+                      type="text"
+                      placeholder="Search logs"
+                      value={logSearch}
+                      onChange={(e) => setLogSearch(e.target.value)}
+                      className={`${smallInputClass} w-48 ml-auto`}
+                    />
+                  </div>
+                  <p className="text-text-muted text-xs">
+                    Showing {filteredLogs.length} of {logs.length} entries
                   </p>
                 </div>
-                {logs.length === 0 ? (
+                {filteredLogs.length === 0 ? (
                   <div className="px-5 py-10 text-center text-text-muted text-sm">
-                    No activity yet
+                    {logs.length === 0 ? "No activity yet" : "No entries match this filter"}
                   </div>
                 ) : (
-                  <div className="divide-y divide-border max-h-[600px] overflow-y-auto">
-                    {logs.map((entry) => {
+                  <div className="divide-y divide-border max-h-[640px] overflow-y-auto">
+                    {filteredLogs.map((entry) => {
                       const style = logTypeStyle[entry.type] || {
-                        emoji: "•",
                         color: "bg-surface text-text-secondary",
                       };
+                      const meta = parseMeta(entry.meta_json);
+                      const open = expandedLogId === entry.id;
                       return (
-                        <div
-                          key={entry.id}
-                          className="px-5 py-3 flex items-start gap-3"
-                        >
-                          <span
-                            className={`text-xs px-2 py-1 rounded-full font-medium shrink-0 ${style.color}`}
+                        <div key={entry.id}>
+                          <div
+                            onClick={() => setExpandedLogId(open ? null : entry.id)}
+                            className="px-5 py-3 flex items-start gap-3 cursor-pointer hover:bg-surface"
                           >
-                            {style.emoji} {entry.type.replace(/_/g, " ")}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-text-primary text-sm">
-                              {entry.message}
-                            </p>
+                            <span
+                              className={`text-xs px-2 py-1 rounded-full font-medium shrink-0 ${style.color}`}
+                            >
+                              {entry.type.replace(/_/g, " ")}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-text-primary text-sm">{entry.message}</p>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="text-text-muted text-xs">
+                                {new Date(entry.created_at).toLocaleString()}
+                              </p>
+                              <p className="text-accent text-xs mt-0.5">
+                                {open ? "Hide details" : "View details"}
+                              </p>
+                            </div>
                           </div>
-                          <span className="text-text-muted text-xs shrink-0">
-                            {new Date(entry.created_at).toLocaleString()}
-                          </span>
+                          {open && (
+                            <div className="px-5 pb-4 bg-surface">
+                              <div className="grid grid-cols-[170px_1fr] gap-y-1.5 gap-x-4 text-xs pt-3">
+                                <span className="text-text-muted">Log ID</span>
+                                <span className="text-text-primary">#{entry.id}</span>
+                                <span className="text-text-muted">Type</span>
+                                <span className="text-text-primary">{entry.type}</span>
+                                <span className="text-text-muted">Time</span>
+                                <span className="text-text-primary">
+                                  {new Date(entry.created_at).toLocaleString()}
+                                </span>
+                                {Object.entries(meta).map(([k, v]) =>
+                                  v === undefined || v === null ? null : (
+                                    <Fragment key={k}>
+                                      <span className="text-text-muted capitalize">
+                                        {k.replace(/_/g, " ")}
+                                      </span>
+                                      <span className="text-text-primary break-words">
+                                        <MetaValue k={k} v={v} />
+                                      </span>
+                                    </Fragment>
+                                  )
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}

@@ -12,4 +12,16 @@ const log = (type, message, meta = {}) => {
   })
 }
 
-module.exports = { log }
+// Who made this request: the IP address and what kind of device it was.
+// The ESP32 reader identifies itself, so we can tell reader taps from
+// browser actions. Never put card UIDs, hashes or secrets in a log.
+const requestInfo = (req) => {
+  const agent = String(req.headers['user-agent'] || '')
+  return {
+    ip: req.ip,
+    source: /esp32/i.test(agent) ? 'ESP32 reader' : 'Browser / app',
+    device: agent.slice(0, 120)
+  }
+}
+
+module.exports = { log, requestInfo }
