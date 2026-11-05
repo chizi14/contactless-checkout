@@ -15,6 +15,7 @@ const transactionRoutes = require('./Routes/transactions')
 const logRoutes = require('./Routes/logs')
 const topupRoutes = require('./Routes/topups')
 const mobileSaleRoutes = require('./Routes/mobile-sales')
+const refundRoutes = require('./Routes/refunds')
 
 app.use('/api/cards', cardRoutes)
 app.use('/api/products', productRoutes)
@@ -23,6 +24,7 @@ app.use('/api/scanner', productRoutes)
 app.use('/api/logs', logRoutes)
 app.use('/api/topups', topupRoutes)
 app.use('/api/mobile-sales', mobileSaleRoutes)
+app.use('/api/refunds', refundRoutes)
 
 app.get('/', (req, res) => {
   res.json({ message: 'Checkout API is running' })

@@ -82,6 +82,20 @@ const createTables = async () => {
     ALTER TABLE transactions ADD COLUMN IF NOT EXISTS payment_ref TEXT;
   `)
 
+  // A refund is a NEW record. The original transaction is never edited or
+  // deleted. UNIQUE(transaction_id) means a sale can only be refunded once.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS refunds (
+      id SERIAL PRIMARY KEY,
+      transaction_id INTEGER NOT NULL UNIQUE REFERENCES transactions(id),
+      amount NUMERIC(12,2) NOT NULL,
+      reason TEXT NOT NULL,
+      restocked BOOLEAN NOT NULL DEFAULT FALSE,
+      refund_method TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `)
+
   // Basket payments made with mobile money through Paychangu. A row starts
   // as 'pending'; the sale is only completed (stock taken, transaction
   // saved) after OUR server verifies the payment with Paychangu.

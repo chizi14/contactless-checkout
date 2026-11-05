@@ -234,6 +234,7 @@ router.get('/', async (req, res) => {
       transactions.decline_reason,
       transactions.created_at,
       transactions.payment_method,
+      EXISTS (SELECT 1 FROM refunds r WHERE r.transaction_id = transactions.id) AS refunded,
       COALESCE(cards.owner_name, 'Mobile Money customer') AS owner_name
     FROM transactions
     LEFT JOIN cards ON transactions.card_id = cards.id
@@ -259,6 +260,7 @@ router.get('/:id', async (req, res) => {
       transactions.decline_reason,
       transactions.created_at,
       transactions.payment_method,
+      EXISTS (SELECT 1 FROM refunds r WHERE r.transaction_id = transactions.id) AS refunded,
       COALESCE(cards.owner_name, 'Mobile Money customer') AS owner_name
     FROM transactions
     LEFT JOIN cards ON transactions.card_id = cards.id

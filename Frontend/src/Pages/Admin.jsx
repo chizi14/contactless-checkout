@@ -142,7 +142,7 @@ function DonutCard({ title, data, colorFor, emptyText }) {
 const logCategory = (type) => {
   if (type.startsWith("tap_")) return "taps";
   if (type.startsWith("scan_")) return "scans";
-  if (type.startsWith("payment_")) return "payments";
+  if (type.startsWith("payment_") || type.startsWith("refund_")) return "payments";
   if (type.startsWith("card_") || type.startsWith("topup_") || type === "balance_adjust") return "cards";
   if (type.startsWith("product_") || type === "stock_alert") return "products";
   if (type === "server_error") return "errors";
@@ -239,6 +239,13 @@ function Admin() {
   const [topupAmounts, setTopupAmounts] = useState({});
   const [editingCardId, setEditingCardId] = useState(null);
   const [cardEditName, setCardEditName] = useState("");
+  const [refundId, setRefundId] = useState(null);
+  const [refundReason, setRefundReason] = useState("");
+  const [refundRestock, setRefundRestock] = useState(true);
+  const [pendingMobile, setPendingMobile] = useState([]);
+  const [resolveRef, setResolveRef] = useState(null);
+  const [resolveNote, setResolveNote] = useState("");
+  const [txMsg, setTxMsg] = useState("");
   const [logFilter, setLogFilter] = useState("all");
   const [logSearch, setLogSearch] = useState("");
   const [expandedLogId, setExpandedLogId] = useState(null);
@@ -257,12 +264,14 @@ function Admin() {
   const fetchAll = async () => {
     setLoading(true);
     try {
-      const [t, p, c, l] = await Promise.all([
+      const [t, p, c, l, pm] = await Promise.all([
         api.get("/transactions"),
         api.get("/products"),
         api.get("/cards"),
         api.get("/logs?limit=300"),
+        api.get("/refunds/pending-mobile"),
       ]);
+      setPendingMobile(pm.data);
       setTransactions(t.data);
       setProducts(p.data);
       setCards(c.data);
@@ -271,6 +280,51 @@ function Admin() {
       console.error("Fetch error:", err);
     }
     setLoading(false);
+  };
+
+  // ---------- Refunds ----------
+  const startRefund = (t) => {
+    setRefundId(t.id);
+    setRefundReason("");
+    setRefundRestock(true);
+    setTxMsg("");
+  };
+
+  const handleRefund = async () => {
+    if (!refundReason.trim()) {
+      setTxMsg("Enter a reason for the refund");
+      return;
+    }
+    try {
+      const res = await api.post("/refunds", {
+        transaction_id: refundId,
+        reason: refundReason,
+        restock: refundRestock,
+      });
+      setTxMsg(res.data.message);
+      setRefundId(null);
+      fetchAll();
+    } catch (err) {
+      setTxMsg(err.response?.data?.error || "Failed to issue the refund");
+    }
+  };
+
+  const handleResolveMobile = async (txRef) => {
+    if (!resolveNote.trim()) {
+      setTxMsg("Enter a note (how was the customer paid back?)");
+      return;
+    }
+    try {
+      await api.post(`/refunds/mobile-sales/${encodeURIComponent(txRef)}/resolve`, {
+        note: resolveNote,
+      });
+      setTxMsg("Marked as refunded");
+      setResolveRef(null);
+      setResolveNote("");
+      fetchAll();
+    } catch (err) {
+      setTxMsg(err.response?.data?.error || "Failed to update");
+    }
   };
 
   // ---------- Products ----------
@@ -524,6 +578,7 @@ function Admin() {
     scan_denied: { color: "bg-yellow-100 text-yellow-700" },
     payment_approved: { color: "bg-success-light text-accent" },
     payment_declined: { color: "bg-danger-light text-danger" },
+    refund_issued: { color: "bg-yellow-100 text-yellow-700" },
     payment_momo_started: { color: "bg-surface text-text-secondary" },
     payment_momo_failed: { color: "bg-danger-light text-danger" },
     payment_refund_needed: { color: "bg-danger-light text-danger" },
@@ -682,6 +737,77 @@ function Admin() {
                   </div>
                 )}
 
+                {txMsg && (
+                  <p className="text-text-secondary text-sm bg-surface rounded-lg px-4 py-2">
+                    {txMsg}
+                  </p>
+                )}
+
+                {pendingMobile.length > 0 && (
+                  <div className="bg-secondary rounded-xl border border-border overflow-hidden">
+                    <div className="px-5 py-4 border-b border-border">
+                      <h3 className="text-text-primary font-semibold">
+                        Customers Owed a Refund
+                      </h3>
+                      <p className="text-text-muted text-xs mt-0.5">
+                        These mobile money payments were received, but an item sold out before the
+                        sale could be completed.
+                      </p>
+                    </div>
+                    <div className="divide-y divide-border">
+                      {pendingMobile.map((m) => (
+                        <div key={m.tx_ref} className="px-5 py-4">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-text-primary text-sm font-medium">
+                                MWK {money(m.total)}
+                              </p>
+                              <p className="text-text-muted text-xs mt-0.5">
+                                {new Date(m.created_at).toLocaleString()} · {m.failure_reason || "Unfulfilled payment"}
+                              </p>
+                              <p className="text-text-muted text-xs break-all">Ref: {m.tx_ref}</p>
+                            </div>
+                            {resolveRef !== m.tx_ref && (
+                              <button
+                                onClick={() => {
+                                  setResolveRef(m.tx_ref);
+                                  setResolveNote("");
+                                }}
+                                className="text-accent text-xs font-medium hover:opacity-70"
+                              >
+                                Mark as Paid Back
+                              </button>
+                            )}
+                          </div>
+                          {resolveRef === m.tx_ref && (
+                            <div className="flex flex-wrap items-center gap-3 mt-3">
+                              <input
+                                type="text"
+                                placeholder="How was the customer paid back?"
+                                value={resolveNote}
+                                onChange={(e) => setResolveNote(e.target.value)}
+                                className={`${smallInputClass} w-72`}
+                              />
+                              <button
+                                onClick={() => handleResolveMobile(m.tx_ref)}
+                                className="bg-accent text-white text-xs font-medium px-3 py-2 rounded-lg hover:bg-accent-light transition-colors"
+                              >
+                                Confirm
+                              </button>
+                              <button
+                                onClick={() => setResolveRef(null)}
+                                className="text-text-muted text-xs hover:opacity-70"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <div className="bg-secondary rounded-xl border border-border overflow-hidden">
                   <div className="px-5 py-4 border-b border-border">
                     <h3 className="text-text-primary font-semibold">
@@ -695,33 +821,87 @@ function Admin() {
                   ) : (
                     <div className="divide-y divide-border">
                       {transactions.map((t) => (
-                        <div
-                          key={t.id}
-                          className="px-5 py-4 flex items-center justify-between"
-                        >
+                        <div key={t.id}>
+                        <div className="px-5 py-4 flex items-center justify-between">
                           <div>
                             <p className="text-text-primary text-sm font-medium">
                               {t.owner_name}
                             </p>
                             <p className="text-text-muted text-xs mt-0.5">
                               {new Date(t.created_at).toLocaleString()} ·
-                              Transaction #{t.id}
+                              Transaction #{t.id} ·{" "}
+                              {t.payment_method === "mobile_money" ? "Mobile Money" : "Card"}
                             </p>
                           </div>
                           <div className="text-right">
                             <p className="text-accent font-bold">
                               MWK {money(t.total_amount)}
                             </p>
-                            <span
-                              className={`text-xs px-2 py-0.5 rounded-full ${
-                                t.status === "approved"
-                                  ? "bg-success-light text-accent"
-                                  : "bg-danger-light text-danger"
-                              }`}
-                            >
-                              {t.status}
-                            </span>
+                            <div className="flex items-center justify-end gap-2 mt-1">
+                              <span
+                                className={`text-xs px-2 py-0.5 rounded-full ${
+                                  t.status === "approved"
+                                    ? "bg-success-light text-accent"
+                                    : "bg-danger-light text-danger"
+                                }`}
+                              >
+                                {t.status}
+                              </span>
+                              {t.refunded && (
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">
+                                  refunded
+                                </span>
+                              )}
+                              {t.status === "approved" && !t.refunded && (
+                                <button
+                                  onClick={() => startRefund(t)}
+                                  className="text-accent text-xs font-medium hover:opacity-70"
+                                >
+                                  Refund
+                                </button>
+                              )}
+                            </div>
                           </div>
+                        </div>
+                        {refundId === t.id && (
+                          <div className="px-5 pb-4 bg-surface">
+                            <p className="text-text-secondary text-xs pt-3 mb-2">
+                              Refund the full MWK {money(t.total_amount)}
+                              {t.payment_method === "mobile_money"
+                                ? ". This was paid by mobile money, so you must pay the customer back yourself. This only records it."
+                                : " back to the card balance."}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-3">
+                              <input
+                                type="text"
+                                placeholder="Reason"
+                                value={refundReason}
+                                onChange={(e) => setRefundReason(e.target.value)}
+                                className={`${smallInputClass} w-64`}
+                              />
+                              <label className="flex items-center gap-2 text-xs text-text-secondary">
+                                <input
+                                  type="checkbox"
+                                  checked={refundRestock}
+                                  onChange={(e) => setRefundRestock(e.target.checked)}
+                                />
+                                Return items to stock
+                              </label>
+                              <button
+                                onClick={handleRefund}
+                                className="bg-accent text-white text-xs font-medium px-3 py-2 rounded-lg hover:bg-accent-light transition-colors"
+                              >
+                                Confirm Refund
+                              </button>
+                              <button
+                                onClick={() => setRefundId(null)}
+                                className="text-text-muted text-xs hover:opacity-70"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
                         </div>
                       ))}
                     </div>
