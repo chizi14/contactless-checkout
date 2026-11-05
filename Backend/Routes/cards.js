@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs')
 const db = require('../Database')
 const crypto = require('crypto')
 const { log, requestInfo } = require('../Logger')
+const paymentSignal = require('../PaymentSignal')
 
 // Fast, one-way fingerprint of a card UID. The secret lives ONLY in the
 // UID_SECRET environment variable on Render, never in the code.
@@ -122,7 +123,9 @@ router.post('/verify', async (req, res) => {
     res.json({
       verified: true,
       card_id: matchedCard.id,
-      owner: matchedCard.owner_name
+      owner: matchedCard.owner_name,
+      // The reader uses this to tell whether a payment result is NEW
+      result_seq: paymentSignal.current().seq
     })
   } catch (error) {
     console.error('Verify error:', error.message)
@@ -151,6 +154,12 @@ router.get('/latest-tap', (req, res) => {
   }
 
   res.json(tap)
+})
+
+// Used by the ESP32 after a tap: what happened to the latest payment?
+router.get('/payment-result', (req, res) => {
+  const last = paymentSignal.current()
+  res.json({ seq: last.seq, result: last.result })
 })
 
 // READ all cards

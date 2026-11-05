@@ -2,6 +2,7 @@ const express = require('express')
 const router = express.Router()
 const db = require('../Database')
 const { log, requestInfo } = require('../Logger')
+const paymentSignal = require('../PaymentSignal')
 
 // Transactions are financial records: they can be created and read,
 // but never edited or deleted. Mistakes are fixed with a void/refund.
@@ -105,6 +106,7 @@ router.post('/', async (req, res) => {
         ...extra,
         ...requestInfo(req)
       })
+      paymentSignal.record('declined')
       return res.status(httpStatus).json({
         approved: false,
         reason,
@@ -193,6 +195,7 @@ router.post('/', async (req, res) => {
       })
     })
 
+    paymentSignal.record('approved')
     res.status(201).json({
       approved: true,
       message: 'Transaction approved',
